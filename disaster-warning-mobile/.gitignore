@@ -1,0 +1,47 @@
+# Node / Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Expo & Build outputs
+.expo/
+dist/
+web-build/
+.expo-build/
+expo-env.d.ts
+
+# Native folders & build artifacts
+/ios
+/android
+.kotlin/
+*.apk
+*.aab
+*.ipa
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+
+# IDE / Editor config
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# TypeScript
+*.tsbuildinfo
