@@ -17,7 +17,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
 import { ScreenContainer } from '@/components/ScreenContainer';
@@ -163,9 +163,16 @@ export default function IssueHazardWarningScreen() {
     }
   }, [selectedEventId]);
 
+  const params = useLocalSearchParams<{ issueWarningForEventId?: string }>();
+
   useEffect(() => {
-    fetchOpenEventsAndTelemetry();
-  }, [fetchOpenEventsAndTelemetry]);
+    if (params.issueWarningForEventId && activeEvents.length > 0) {
+      const targetEvent = activeEvents.find((e) => e.id === params.issueWarningForEventId);
+      if (targetEvent) {
+        handleOpenComposerForEvent(targetEvent);
+      }
+    }
+  }, [params.issueWarningForEventId, activeEvents]);
 
   const onRefresh = async () => {
     setRefreshing(true);
