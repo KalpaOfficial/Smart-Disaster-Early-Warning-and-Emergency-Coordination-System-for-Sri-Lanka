@@ -19,7 +19,22 @@
     "web": {
       "output": "static"
     },
-    "plugins": ["expo-router"],
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app accesses your photos to let you submit ground disaster report evidence.",
+          "cameraPermission": "The app accesses your camera to let you take photos of disaster scenes."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow this app to use your location to identify hazard incident coordinates."
+        }
+      ]
+    ],
     "experiments": {
       "typedRoutes": true
     }

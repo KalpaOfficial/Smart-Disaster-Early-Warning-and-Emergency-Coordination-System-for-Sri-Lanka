@@ -5,6 +5,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { initializeFirestore, getFirestore, Firestore } from 'firebase/firestore';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
@@ -21,6 +22,9 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 // Initialise Auth
 const auth: Auth = getAuth(app);
 
+// Initialise Storage
+const storage: FirebaseStorage = getStorage(app);
+
 // Initialise Firestore with auto-detect long polling to eliminate 10-30s WebChannel stream stalls
 let db: Firestore;
 try {
@@ -31,4 +35,4 @@ try {
   db = getFirestore(app);
 }
 
-export { app, auth, db };
+export { app, auth, db, storage };
