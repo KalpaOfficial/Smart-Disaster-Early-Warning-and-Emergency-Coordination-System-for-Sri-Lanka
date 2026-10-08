@@ -29,6 +29,12 @@ import { getActiveWarnings } from '@/services/warningService';
 import { getShelters } from '@/services/shelterService';
 import { getTeams } from '@/services/rescueTeamService';
 import { getSupplies, getDistributions } from '@/services/reliefSupplyService';
+import {
+  getGroundReportStats,
+  getMyReports,
+  getPendingReports,
+} from '@/services/groundReportService';
+import { getOfflineQueueCount } from '@/services/offlineQueueService';
 import type {
   HazardEvent,
   Shelter,
@@ -37,6 +43,7 @@ import type {
   Distribution,
 } from '@/types/resources';
 import type { HazardWarning } from '@/types/warning';
+import type { GroundReportStats, GroundReport } from '@/types/groundReport';
 
 export default function DashboardScreen() {
   const { state, logout } = useAuth();
@@ -50,18 +57,38 @@ export default function DashboardScreen() {
   const [teams, setTeams] = useState<RescueTeam[]>([]);
   const [supplies, setSupplies] = useState<ReliefSupply[]>([]);
   const [distributions, setDistributions] = useState<Distribution[]>([]);
+  const [reportStats, setReportStats] = useState<GroundReportStats>({
+    total: 0,
+    pending: 0,
+    verified: 0,
+    rejected: 0,
+    infoRequested: 0,
+    offlineQueued: 0,
+  });
+  const [recentReports, setRecentReports] = useState<GroundReport[]>([]);
+  const [myReportsCount, setMyReportsCount] = useState(0);
+  const [offlineCount, setOfflineCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadDashboardData = useCallback(async () => {
     try {
-      const [evts, warnList, shs, tms, sups, dists] = await Promise.all([
+      const [evts, warnList, shs, tms, sups, dists, rStats, offCount] = await Promise.all([
         getActiveEvents(),
         getActiveWarnings(),
         getShelters(),
         getTeams(),
         getSupplies(),
         getDistributions(),
+        getGroundReportStats().catch(() => ({
+          total: 0,
+          pending: 0,
+          verified: 0,
+          rejected: 0,
+          infoRequested: 0,
+          offlineQueued: 0,
+        })),
+        getOfflineQueueCount().catch(() => 0),
       ]);
       setActiveEvents(evts);
       setWarnings(warnList);
@@ -69,6 +96,17 @@ export default function DashboardScreen() {
       setTeams(tms);
       setSupplies(sups);
       setDistributions(dists);
+      setReportStats(rStats);
+      setOfflineCount(offCount);
+
+      if (user?.role === 'dmc_officer') {
+        const pending = await getPendingReports().catch(() => []);
+        setRecentReports(pending.slice(0, 3));
+      } else if (user?.id) {
+        const mine = await getMyReports(user.id).catch(() => []);
+        setMyReportsCount(mine.length);
+        setRecentReports(mine.slice(0, 3));
+      }
     } catch (err) {
       console.warn('Dashboard live telemetry fetch notice:', err);
     } finally {
@@ -177,6 +215,19 @@ export default function DashboardScreen() {
         route: '/(app)/warnings',
       },
       {
+        id: 'reports',
+        title: 'UC02 — Ground Reports',
+        badge: user?.role === 'dmc_officer'
+          ? `${reportStats.pending} PENDING`
+          : `${myReportsCount} SUBMITTED`,
+        description: user?.role === 'dmc_officer'
+          ? 'Duty officer verification queue & assessments'
+          : 'Hazard observations, photos & real-time sync',
+        icon: 'document-text-outline' as const,
+        color: '#38BDF8',
+        route: '/(app)/reports',
+      },
+      {
         id: 'resources',
         title: 'Resource Coordination',
         badge: activeEvents.length > 0 ? `${activeEvents.length} DISASTER${activeEvents.length > 1 ? 'S' : ''}` : 'STANDBY',
@@ -222,7 +273,7 @@ export default function DashboardScreen() {
         route: '/(app)/resources/seed',
       },
     ],
-    [warnings, activeEvents, activeShelters, deployedTeams, totalRemainingSupplies],
+    [warnings, activeEvents, activeShelters, deployedTeams, totalRemainingSupplies, reportStats, myReportsCount, user?.role],
   );
 
   // Live Field Telemetry generated strictly from real Firestore data
@@ -235,6 +286,18 @@ export default function DashboardScreen() {
       icon: keyof typeof Ionicons.glyphMap;
       color: string;
     }[] = [];
+
+    // Real Ground Reports from Firestore (UC02)
+    recentReports.slice(0, 3).forEach((r) => {
+      list.push({
+        id: `report-${r.id}`,
+        time: r.createdAt ? new Date(r.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recent',
+        title: `Observation: ${r.observationType.replace(/_/g, ' ').toUpperCase()}`,
+        desc: `${r.description.substring(0, 60)}${r.description.length > 60 ? '...' : ''} (${r.district}) • Status: ${r.status.replace(/_/g, ' ').toUpperCase()}`,
+        icon: 'document-text-outline',
+        color: r.status === 'verified' ? '#10B981' : r.status === 'pending_verification' ? '#F59E0B' : '#38BDF8',
+      });
+    });
 
     // Real distribution records from Firestore
     distributions.slice(0, 3).forEach((d) => {
@@ -273,7 +336,7 @@ export default function DashboardScreen() {
     });
 
     return list;
-  }, [distributions, deployedTeams, activeShelters]);
+  }, [recentReports, distributions, deployedTeams, activeShelters]);
 
   return (
     <ScreenContainer>
@@ -403,6 +466,95 @@ export default function DashboardScreen() {
           );
         })()}
 
+        {/* Ground Hazard Report (UC02) Quick Action Banner */}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() =>
+            router.push(
+              (user?.role === 'dmc_officer'
+                ? '/(app)/reports'
+                : '/(app)/reports/submit') as never,
+            )
+          }
+          style={styles.groundReportBanner}
+        >
+          <LinearGradient
+            colors={
+              user?.role === 'dmc_officer'
+                ? ['#0C4A6E', '#0F172A']
+                : ['#065F46', '#0F172A']
+            }
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.groundReportBannerInner}
+          >
+            <View
+              style={[
+                styles.groundReportIconBox,
+                {
+                  backgroundColor:
+                    user?.role === 'dmc_officer'
+                      ? 'rgba(56, 189, 248, 0.2)'
+                      : 'rgba(16, 185, 129, 0.2)',
+                },
+              ]}
+            >
+              <Ionicons
+                name={user?.role === 'dmc_officer' ? 'shield-checkmark' : 'camera'}
+                size={24}
+                color={user?.role === 'dmc_officer' ? '#38BDF8' : '#10B981'}
+              />
+            </View>
+            <View style={styles.groundReportContent}>
+              <View style={styles.groundReportPillRow}>
+                <Text
+                  style={[
+                    styles.groundReportPill,
+                    {
+                      color:
+                        user?.role === 'dmc_officer' ? '#38BDF8' : '#10B981',
+                      backgroundColor:
+                        user?.role === 'dmc_officer'
+                          ? 'rgba(56, 189, 248, 0.15)'
+                          : 'rgba(16, 185, 129, 0.15)',
+                    },
+                  ]}
+                >
+                  {user?.role === 'dmc_officer'
+                    ? 'DUTY OFFICER VERIFICATION'
+                    : 'GROUND HAZARD OBSERVATION (UC02)'}
+                </Text>
+                {offlineCount > 0 && (
+                  <TouchableOpacity
+                    style={styles.offlineAlertBadge}
+                    onPress={() => router.push('/(app)/reports/offline-queue' as never)}
+                  >
+                    <Ionicons name="cloud-offline" size={10} color="#F59E0B" />
+                    <Text style={styles.offlineAlertBadgeText}>
+                      {offlineCount} Queued
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <Text style={styles.groundReportTitle}>
+                {user?.role === 'dmc_officer'
+                  ? `${reportStats.pending} Report${reportStats.pending !== 1 ? 's' : ''} Awaiting Review`
+                  : 'Submit Ground Hazard Report'}
+              </Text>
+              <Text style={styles.groundReportDesc}>
+                {user?.role === 'dmc_officer'
+                  ? 'Assess incoming evidence photos and coordinates, and link to active hazard events.'
+                  : 'Report rising floodwaters, blocked roads, or landslide cracks with photo & GPS.'}
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color={user?.role === 'dmc_officer' ? '#38BDF8' : '#10B981'}
+            />
+          </LinearGradient>
+        </TouchableOpacity>
+
         {/* Rapid KPI Telemetry Grid — 100% Real Firestore Data */}
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>REAL-TIME CAPABILITY MATRIX</Text>
@@ -410,6 +562,49 @@ export default function DashboardScreen() {
         </View>
 
         <View style={styles.kpiGrid}>
+          {/* Ground Reports KPI (UC02) */}
+          <Card
+            style={styles.kpiCard}
+            onPress={() => router.push('/(app)/reports' as never)}
+          >
+            <View style={styles.kpiTop}>
+              <View
+                style={[
+                  styles.kpiIconBox,
+                  { backgroundColor: 'rgba(56, 189, 248, 0.15)' },
+                ]}
+              >
+                <Ionicons name="document-text-outline" size={20} color="#38BDF8" />
+              </View>
+              <Text
+                style={[
+                  styles.kpiChange,
+                  {
+                    color:
+                      reportStats.pending > 0 ? '#F59E0B' : '#10B981',
+                  },
+                ]}
+              >
+                {user?.role === 'dmc_officer'
+                  ? `${reportStats.pending} Pending`
+                  : offlineCount > 0
+                  ? `${offlineCount} Offline`
+                  : `${reportStats.verified} Verified`}
+              </Text>
+            </View>
+            <Text style={styles.kpiValue}>
+              {user?.role === 'dmc_officer' ? reportStats.pending : myReportsCount}
+            </Text>
+            <Text style={styles.kpiLabel}>
+              {user?.role === 'dmc_officer'
+                ? 'Pending Reports'
+                : 'My Ground Reports'}
+            </Text>
+            <Text style={styles.kpiSub}>
+              {reportStats.total} Total in System
+            </Text>
+          </Card>
+
           {/* Real Shelters KPI */}
           <Card
             style={styles.kpiCard}
@@ -702,6 +897,76 @@ const styles = StyleSheet.create({
   seederDesc: {
     fontSize: FontSize.xs,
     color: '#D8B4FE',
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  groundReportBanner: {
+    marginBottom: Spacing.xl,
+    borderRadius: BorderRadius.xl,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.35)',
+    shadowColor: '#38BDF8',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 14,
+    elevation: 6,
+  },
+  groundReportBannerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.lg,
+    gap: Spacing.md,
+  },
+  groundReportIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.4)',
+  },
+  groundReportContent: {
+    flex: 1,
+  },
+  groundReportPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    marginBottom: 4,
+  },
+  groundReportPill: {
+    fontSize: FontSize.micro,
+    fontWeight: '800',
+    paddingHorizontal: Spacing.xs + 2,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.xs,
+    letterSpacing: 0.6,
+  },
+  offlineAlertBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.xs,
+  },
+  offlineAlertBadgeText: {
+    fontSize: FontSize.micro,
+    fontWeight: '800',
+    color: '#F59E0B',
+  },
+  groundReportTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
+  },
+  groundReportDesc: {
+    fontSize: FontSize.xs,
+    color: Colors.text.secondary,
     marginTop: 2,
     lineHeight: 16,
   },
