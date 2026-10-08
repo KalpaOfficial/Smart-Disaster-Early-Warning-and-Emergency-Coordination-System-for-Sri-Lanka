@@ -17,8 +17,10 @@ export const SEED_DATA = {
       id: 'event-monsoon-2026',
       title: 'Southwest Monsoon Severe Flooding — Kalu & Kelani River Basins 2026',
       hazardType: 'flood',
+      warningLevel: 'Level 4 Alert',
       status: 'active',
       affectedDistricts: ['Ratnapura', 'Kalutara', 'Colombo', 'Gampaha'],
+      affectedRiverBasins: ['Kalu River Basin', 'Kelani River Basin'],
       description:
         'Continuous torrential rains exceeding 200mm have triggered critical flood levels in Kalu, Kelani, and Nilwala rivers. Evacuations in progress.',
     },
@@ -26,8 +28,10 @@ export const SEED_DATA = {
       id: 'event-landslide-2026',
       title: 'Central Highlands Level 3 Landslide Warning — Kegalle & Badulla',
       hazardType: 'landslide',
+      warningLevel: 'Level 3 Warning',
       status: 'active',
       affectedDistricts: ['Kegalle', 'Badulla', 'Nuwara Eliya', 'Kandy'],
+      affectedRiverBasins: ['Mahaweli River Basin'],
       description:
         'NBRO Red Alert issued for high-risk mountain slopes and catchment corridors following 48 hours of uninterrupted precipitation.',
     },
@@ -39,6 +43,117 @@ export const SEED_DATA = {
       affectedDistricts: ['Batticaloa', 'Ampara', 'Trincomalee'],
       description:
         'Coastal warning downgraded as tropical depression crossed into the Bay of Bengal without landfall damage.',
+    },
+  ],
+
+  warnings: [
+    {
+      id: 'warning-kalu-river-red',
+      warningId: 'warning-kalu-river-red',
+      eventId: 'event-monsoon-2026',
+      hazardEventId: 'event-monsoon-2026',
+      headline: 'RED EVACUATION ALERT: Kalu River Basin Critical Water Level',
+      title: 'RED EVACUATION ALERT: Kalu River Basin Critical Water Level',
+      hazardType: 'flood',
+      severity: 'evacuation',
+      targetMode: 'river_basin',
+      targetAreas: ['Kalu River Basin'],
+      resolvedDistricts: ['Ratnapura', 'Kalutara'],
+      recipientCount: 1420,
+      instructions:
+        'Immediate evacuation ordered for residents in low-lying areas along Kalu River. Move immediately to designated emergency shelters.',
+      channels: ['push', 'sms', 'audible'],
+      status: 'delivered',
+      issuedBy: 'seed-dmc-officer',
+      issuedByUid: 'seed-dmc-officer',
+      issuedByName: 'DMC National Command Centre',
+    },
+    {
+      id: 'warning-kegalle-landslide-amber',
+      warningId: 'warning-kegalle-landslide-amber',
+      eventId: 'event-landslide-2026',
+      hazardEventId: 'event-landslide-2026',
+      headline: 'AMBER LANDSLIDE WARNING: NBRO Red Alert for High Slopes',
+      title: 'AMBER LANDSLIDE WARNING: NBRO Red Alert for High Slopes',
+      hazardType: 'landslide',
+      severity: 'warning',
+      targetMode: 'district',
+      targetAreas: ['Kegalle', 'Badulla', 'Nuwara Eliya'],
+      resolvedDistricts: ['Kegalle', 'Badulla', 'Nuwara Eliya'],
+      recipientCount: 850,
+      instructions:
+        'NBRO Level 3 alert active. Be prepared to evacuate if slope cracks, sudden water springs, or earth movements are observed.',
+      channels: ['push', 'sms'],
+      status: 'delivered',
+      issuedBy: 'seed-dmc-officer',
+      issuedByUid: 'seed-dmc-officer',
+      issuedByName: 'NBRO & DMC Command Centre',
+    },
+  ],
+
+  users: [
+    {
+      id: 'test-user-dmc-officer',
+      email: 'officer@dmc.gov.lk',
+      fullName: 'Kamal Fernando (DMC Duty Officer)',
+      role: 'dmc_officer',
+      district: 'Colombo',
+      phone: '+94771234567',
+      organisation: 'Disaster Management Centre',
+    },
+    {
+      id: 'test-user-citizen-ratnapura',
+      email: 'sunil.ratnapura@gmail.com',
+      fullName: 'Sunil Ratnayake',
+      role: 'citizen',
+      district: 'Ratnapura',
+      phone: '+94714567890',
+      organisation: 'Citizen',
+    },
+    {
+      id: 'test-user-citizen-kalutara',
+      email: 'anusha.kalutara@gmail.com',
+      fullName: 'Anusha Perera',
+      role: 'citizen',
+      district: 'Kalutara',
+      phone: '+94772345678',
+      organisation: 'Citizen',
+    },
+    {
+      id: 'test-user-citizen-colombo',
+      email: 'nimal.colombo@gmail.com',
+      fullName: 'Nimal De Silva',
+      role: 'citizen',
+      district: 'Colombo',
+      phone: '+94763456789',
+      organisation: 'Citizen',
+    },
+    {
+      id: 'test-user-citizen-gampaha',
+      email: 'priyantha.gampaha@gmail.com',
+      fullName: 'Priyantha Wickramasinghe',
+      role: 'citizen',
+      district: 'Gampaha',
+      phone: '+94704567890',
+      organisation: 'Citizen',
+    },
+    {
+      id: 'test-user-citizen-kegalle',
+      email: 'bandara.kegalle@gmail.com',
+      fullName: 'Bandara Jayawardena',
+      role: 'citizen',
+      district: 'Kegalle',
+      phone: '+94785678901',
+      organisation: 'Citizen',
+    },
+    {
+      id: 'test-user-citizen-badulla',
+      email: 'saman.badulla@gmail.com',
+      fullName: 'Saman Kumara',
+      role: 'citizen',
+      district: 'Badulla',
+      phone: '+94756789012',
+      organisation: 'Citizen',
     },
   ],
 
@@ -335,6 +450,8 @@ export const SEED_DATA = {
  */
 export async function seedFirestoreDatabase(): Promise<{
   events: number;
+  warnings: number;
+  users: number;
   shelters: number;
   teams: number;
   supplies: number;
@@ -391,8 +508,28 @@ export async function seedFirestoreDatabase(): Promise<{
     });
   }
 
+  // 6. Hazard Warnings (UC01)
+  for (const item of SEED_DATA.warnings) {
+    await setDoc(doc(db, 'warnings', item.id), {
+      ...item,
+      issuedAt: serverTimestamp(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  // 7. Test Users for Recipient & Role Testing (UC01)
+  for (const item of SEED_DATA.users) {
+    await setDoc(doc(db, 'users', item.id), {
+      ...item,
+      createdAt: serverTimestamp(),
+    });
+  }
+
   return {
     events: SEED_DATA.hazardEvents.length,
+    warnings: SEED_DATA.warnings.length,
+    users: SEED_DATA.users.length,
     shelters: SEED_DATA.shelters.length,
     teams: SEED_DATA.rescueTeams.length,
     supplies: SEED_DATA.reliefSupplies.length,

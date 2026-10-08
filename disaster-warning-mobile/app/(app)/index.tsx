@@ -25,6 +25,7 @@ import { MobileNavBar } from '@/components/MobileNavBar';
 import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/colors';
 import { getRoleLabel } from '@/constants/roles';
 import { getActiveEvents } from '@/services/hazardEventService';
+import { getActiveWarnings } from '@/services/warningService';
 import { getShelters } from '@/services/shelterService';
 import { getTeams } from '@/services/rescueTeamService';
 import { getSupplies, getDistributions } from '@/services/reliefSupplyService';
@@ -35,6 +36,7 @@ import type {
   ReliefSupply,
   Distribution,
 } from '@/types/resources';
+import type { HazardWarning } from '@/types/warning';
 
 export default function DashboardScreen() {
   const { state, logout } = useAuth();
@@ -43,6 +45,7 @@ export default function DashboardScreen() {
 
   // Real-time Firestore state
   const [activeEvents, setActiveEvents] = useState<HazardEvent[]>([]);
+  const [warnings, setWarnings] = useState<HazardWarning[]>([]);
   const [shelters, setShelters] = useState<Shelter[]>([]);
   const [teams, setTeams] = useState<RescueTeam[]>([]);
   const [supplies, setSupplies] = useState<ReliefSupply[]>([]);
@@ -52,14 +55,16 @@ export default function DashboardScreen() {
 
   const loadDashboardData = useCallback(async () => {
     try {
-      const [evts, shs, tms, sups, dists] = await Promise.all([
+      const [evts, warnList, shs, tms, sups, dists] = await Promise.all([
         getActiveEvents(),
+        getActiveWarnings(),
         getShelters(),
         getTeams(),
         getSupplies(),
         getDistributions(),
       ]);
       setActiveEvents(evts);
+      setWarnings(warnList);
       setShelters(shs);
       setTeams(tms);
       setSupplies(sups);
@@ -163,6 +168,15 @@ export default function DashboardScreen() {
   const tacticalModules = useMemo(
     () => [
       {
+        id: 'warnings',
+        title: 'UC01 — Issue Hazard Warning',
+        badge: warnings.length > 0 ? `${warnings.length} ACTIVE ALERT${warnings.length > 1 ? 'S' : ''}` : 'NO ALERTS',
+        description: 'Location-specific warnings & evacuation alerts',
+        icon: 'megaphone-outline' as const,
+        color: '#EF4444',
+        route: '/(app)/warnings',
+      },
+      {
         id: 'resources',
         title: 'Resource Coordination',
         badge: activeEvents.length > 0 ? `${activeEvents.length} DISASTER${activeEvents.length > 1 ? 'S' : ''}` : 'STANDBY',
@@ -208,7 +222,7 @@ export default function DashboardScreen() {
         route: '/(app)/resources/seed',
       },
     ],
-    [activeEvents, activeShelters, deployedTeams, totalRemainingSupplies],
+    [warnings, activeEvents, activeShelters, deployedTeams, totalRemainingSupplies],
   );
 
   // Live Field Telemetry generated strictly from real Firestore data
@@ -337,51 +351,57 @@ export default function DashboardScreen() {
           </LinearGradient>
         </TouchableOpacity>
 
-        {/* Live Active Emergency Event Hero Card */}
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => router.push('/(app)/resources')}
-        >
-          <LinearGradient
-            colors={['#1E1B4B', '#0F172A']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.heroAlertCard}
-          >
-            <View style={styles.heroAlertHeader}>
-              <View style={styles.beaconPill}>
-                <View style={[styles.beaconDot, { backgroundColor: activeHazardEvent ? '#EF4444' : '#10B981' }]} />
-                <Text style={styles.beaconText}>
-                  {activeHazardEvent ? `LEVEL 4 ${activeHazardEvent.hazardType.toUpperCase()} ALERT • ACTIVE` : 'DISASTER MONITORING • STANDBY'}
-                </Text>
-              </View>
-              <Text style={styles.heroAlertTime}>Live Telemetry</Text>
-            </View>
+        {/* Live Active Emergency Event & Warning Hero Card */}
+        {(() => {
+          const topWarning = warnings[0];
+          const displayTitle = topWarning?.headline || activeHazardEvent?.title || 'No Active Disaster Declared';
+          const displayDesc = topWarning?.instructions || activeHazardEvent?.description || 'All provincial meteorological and flood monitoring stations are within baseline thresholds.';
+          const displayDistricts: string[] = topWarning?.targetAreas?.length ? topWarning.targetAreas : affectedDistricts;
+          const displayBadge = topWarning
+            ? `${topWarning.severity.toUpperCase()} ALERT • ${topWarning.hazardType.toUpperCase()}`
+            : activeHazardEvent
+            ? `LEVEL 4 ${activeHazardEvent.hazardType.toUpperCase()} ALERT • ACTIVE`
+            : 'DISASTER MONITORING • STANDBY';
 
-            <Text style={styles.heroAlertTitle}>
-              {activeHazardEvent ? activeHazardEvent.title : 'No Active Disaster Declared'}
-            </Text>
-            <Text style={styles.heroAlertDescription}>
-              {activeHazardEvent
-                ? activeHazardEvent.description
-                : 'All provincial meteorological and flood monitoring stations are within baseline thresholds.'}
-            </Text>
-
-            <View style={styles.districtChipsRow}>
-              {affectedDistricts.map((d) => (
-                <View key={d} style={styles.districtChip}>
-                  <Ionicons name="location-sharp" size={11} color={Colors.accent.primary} />
-                  <Text style={styles.districtChipText}>{d}</Text>
+          return (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => router.push('/(app)/warnings' as never)}
+            >
+              <LinearGradient
+                colors={topWarning?.severity === 'evacuation' ? ['#450A0A', '#0F172A'] : ['#1E1B4B', '#0F172A']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.heroAlertCard}
+              >
+                <View style={styles.heroAlertHeader}>
+                  <View style={styles.beaconPill}>
+                    <View style={[styles.beaconDot, { backgroundColor: topWarning ? '#EF4444' : activeHazardEvent ? '#F59E0B' : '#10B981' }]} />
+                    <Text style={styles.beaconText}>{displayBadge}</Text>
+                  </View>
+                  <Text style={styles.heroAlertTime}>UC01 Broadcast</Text>
                 </View>
-              ))}
-            </View>
 
-            <View style={styles.heroFooter}>
-              <Text style={styles.heroFooterAction}>Open Combined Operational Picture</Text>
-              <Ionicons name="arrow-forward" size={16} color={Colors.accent.primary} />
-            </View>
-          </LinearGradient>
-        </TouchableOpacity>
+                <Text style={styles.heroAlertTitle}>{displayTitle}</Text>
+                <Text style={styles.heroAlertDescription}>{displayDesc}</Text>
+
+                <View style={styles.districtChipsRow}>
+                  {displayDistricts.map((d: string) => (
+                    <View key={d} style={styles.districtChip}>
+                      <Ionicons name="location-sharp" size={11} color={Colors.accent.primary} />
+                      <Text style={styles.districtChipText}>{d}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.heroFooter}>
+                  <Text style={styles.heroFooterAction}>View Official Hazard Warning Portal (UC01)</Text>
+                  <Ionicons name="arrow-forward" size={16} color={Colors.accent.primary} />
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+          );
+        })()}
 
         {/* Rapid KPI Telemetry Grid — 100% Real Firestore Data */}
         <View style={styles.sectionHeaderRow}>

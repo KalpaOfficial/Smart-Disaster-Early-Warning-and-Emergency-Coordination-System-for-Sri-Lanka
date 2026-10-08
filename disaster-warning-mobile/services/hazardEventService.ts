@@ -10,6 +10,8 @@ import {
   doc,
   getDoc,
   addDoc,
+  updateDoc,
+  arrayUnion,
   serverTimestamp,
   type DocumentData,
   type QueryDocumentSnapshot,
@@ -25,8 +27,10 @@ function mapEventDoc(docSnap: QueryDocumentSnapshot<DocumentData>): HazardEvent 
     id: docSnap.id,
     title: d.title || '',
     hazardType: d.hazardType || 'flood',
+    warningLevel: d.warningLevel || 'Level 4 Alert',
     status: d.status || 'active',
     affectedDistricts: d.affectedDistricts || [],
+    affectedRiverBasins: d.affectedRiverBasins || [],
     startDate: d.startDate?.toDate?.()?.toISOString() || new Date().toISOString(),
     description: d.description || '',
   };
@@ -88,4 +92,30 @@ export async function createHazardEvent(
     createdAt: serverTimestamp(),
   });
   return docRef.id;
+}
+
+/**
+ * Attach an issued warning to the hazard event timeline (UC01 Step 20).
+ */
+export async function attachWarningToTimeline(
+  hazardEventId: string,
+  warningId: string,
+  headline: string,
+): Promise<void> {
+  if (!hazardEventId) return;
+  try {
+    const eventRef = doc(db, COLLECTION, hazardEventId);
+    await updateDoc(eventRef, {
+      timeline: arrayUnion({
+        id: `timeline-warn-${warningId}`,
+        type: 'warning_issued',
+        warningId,
+        headline,
+        timestamp: new Date().toISOString(),
+      }),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.warn('Notice attaching warning to timeline:', error);
+  }
 }
