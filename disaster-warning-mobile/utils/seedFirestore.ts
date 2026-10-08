@@ -42,6 +42,37 @@ export const SEED_DATA = {
     },
   ],
 
+  warnings: [
+    {
+      id: 'warning-kalu-river-red',
+      title: 'RED EVACUATION ALERT: Kalu River Basin Critical Water Level',
+      hazardType: 'flood',
+      severity: 'evacuation',
+      status: 'active',
+      targetDistricts: ['Ratnapura', 'Kalutara'],
+      instructions:
+        'Immediate evacuation ordered for residents in low-lying areas along Kalu River. Move immediately to designated emergency shelters.',
+      hazardEventId: 'event-monsoon-2026',
+      hazardEventTitle: 'Southwest Monsoon Severe Flooding — Kalu & Kelani River Basins 2026',
+      issuedByUid: 'seed-dmc-officer',
+      issuedByName: 'DMC National Command Centre',
+    },
+    {
+      id: 'warning-kegalle-landslide-amber',
+      title: 'AMBER LANDSLIDE WARNING: NBRO Red Alert for High Slopes',
+      hazardType: 'landslide',
+      severity: 'warning',
+      status: 'active',
+      targetDistricts: ['Kegalle', 'Badulla', 'Nuwara Eliya'],
+      instructions:
+        'NBRO Level 3 alert active. Be prepared to evacuate if slope cracks, sudden water springs, or earth movements are observed.',
+      hazardEventId: 'event-landslide-2026',
+      hazardEventTitle: 'Central Highlands Level 3 Landslide Warning — Kegalle & Badulla',
+      issuedByUid: 'seed-dmc-officer',
+      issuedByName: 'NBRO & DMC Command Centre',
+    },
+  ],
+
   shelters: [
     {
       id: 'shelter-ratnapura-bodhiraja',
@@ -335,6 +366,7 @@ export const SEED_DATA = {
  */
 export async function seedFirestoreDatabase(): Promise<{
   events: number;
+  warnings: number;
   shelters: number;
   teams: number;
   supplies: number;
@@ -391,8 +423,19 @@ export async function seedFirestoreDatabase(): Promise<{
     });
   }
 
+  // 6. Hazard Warnings (UC01)
+  for (const item of SEED_DATA.warnings) {
+    await setDoc(doc(db, 'warnings', item.id), {
+      ...item,
+      issuedAt: serverTimestamp(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
   return {
     events: SEED_DATA.hazardEvents.length,
+    warnings: SEED_DATA.warnings.length,
     shelters: SEED_DATA.shelters.length,
     teams: SEED_DATA.rescueTeams.length,
     supplies: SEED_DATA.reliefSupplies.length,

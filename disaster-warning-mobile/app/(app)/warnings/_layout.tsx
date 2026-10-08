@@ -1,0 +1,19 @@
+/**
+ * Warnings layout — Stack navigator for UC01 Issue Hazard Warning screens.
+ */
+import { Stack } from 'expo-router';
+import { Colors } from '@/constants/colors';
+
+export default function WarningsLayout() {
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: Colors.bg.primary },
+        animation: 'slide_from_right',
+      }}
+    >
+      <Stack.Screen name="index" />
+    </Stack>
+  );
+}
