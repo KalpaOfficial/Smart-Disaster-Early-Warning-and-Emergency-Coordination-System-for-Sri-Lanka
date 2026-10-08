@@ -443,6 +443,111 @@ export const SEED_DATA = {
       hazardEventId: 'event-monsoon-2026',
     },
   ],
+
+  groundReports: [
+    {
+      id: 'report-ratnapura-kalu-flood',
+      referenceNumber: 'GR-20261009-0101',
+      observationType: 'rising_water',
+      description:
+        'Flood water reached 3.5 feet on Colombo-Ratnapura main road near Kalu Ganga bridge. Small vehicles unable to pass.',
+      photoUrl:
+        'https://images.unsplash.com/photo-1547683905-f686c993aae5?auto=format&fit=crop&w=800&q=80',
+      photoPath: 'ground-reports/report-ratnapura-kalu-flood/photo.jpg',
+      location: { latitude: 6.6828, longitude: 80.4035 },
+      locationName: 'Kalu Ganga Bridge, Ratnapura',
+      district: 'Ratnapura',
+      isManualLocation: false,
+      submitterId: 'test-user-citizen-ratnapura',
+      submitterName: 'Nimal Bandara',
+      submitterRole: 'volunteer',
+      status: 'pending_verification',
+      hazardEventId: null,
+      hazardEventTitle: null,
+      verifiedBy: null,
+      verifiedByName: null,
+      verificationDecision: null,
+      infoRequestedMessage: null,
+      additionalInfo: null,
+    },
+    {
+      id: 'report-kegalle-roadblock',
+      referenceNumber: 'GR-20261009-0102',
+      observationType: 'blocked_road',
+      description:
+        'Severe mudslide and fallen electrical poles blocking Awissawella-Hatton road completely.',
+      photoUrl:
+        'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=800&q=80',
+      photoPath: 'ground-reports/report-kegalle-roadblock/photo.jpg',
+      location: { latitude: 6.9612, longitude: 80.2185 },
+      locationName: 'Getahetta Junction, Awissawella',
+      district: 'Kegalle',
+      isManualLocation: false,
+      submitterId: 'test-user-citizen-colombo',
+      submitterName: 'Kamal Perera',
+      submitterRole: 'citizen',
+      status: 'verified',
+      hazardEventId: 'event-monsoon-2026',
+      hazardEventTitle: 'Southwest Monsoon Severe Flooding — Kalu & Kelani River Basins 2026',
+      verifiedBy: 'system-seed-officer',
+      verifiedByName: 'Major General (Retd.) K. Fernando (DMC Duty Director)',
+      verificationDecision: 'Confirmed with District Secretariat. Road clearance team deployed.',
+      infoRequestedMessage: null,
+      additionalInfo: null,
+    },
+    {
+      id: 'report-kadugannawa-crack',
+      referenceNumber: 'GR-20261009-0103',
+      observationType: 'landslide_crack',
+      description:
+        'Deep horizontal cracks (approx 4 inches wide) observed on the slope behind Kadugannawa railway reservation.',
+      photoUrl:
+        'https://images.unsplash.com/photo-1508873696983-2df5293cb32f?auto=format&fit=crop&w=800&q=80',
+      photoPath: 'ground-reports/report-kadugannawa-crack/photo.jpg',
+      location: { latitude: 7.2554, longitude: 80.5234 },
+      locationName: 'Upper Slope, Kadugannawa',
+      district: 'Kandy',
+      isManualLocation: true,
+      submitterId: 'test-user-citizen-badulla',
+      submitterName: 'Saman Kumara',
+      submitterRole: 'volunteer',
+      status: 'info_requested',
+      hazardEventId: null,
+      hazardEventTitle: null,
+      verifiedBy: 'system-seed-officer',
+      verifiedByName: 'DMC Verification Desk',
+      verificationDecision: null,
+      infoRequestedMessage:
+        'Please provide approximate length of crack and distance from the closest inhabited residence.',
+      additionalInfo: null,
+    },
+    {
+      id: 'report-colombo-lightning-rejected',
+      referenceNumber: 'GR-20261009-0104',
+      observationType: 'other',
+      description:
+        'Distant lightning observed over the ocean horizon 2 hours ago. No rain currently.',
+      photoUrl:
+        'https://images.unsplash.com/photo-1515694346937-94d85e41e6f0?auto=format&fit=crop&w=800&q=80',
+      photoPath: 'ground-reports/report-colombo-lightning-rejected/photo.jpg',
+      location: { latitude: 6.9271, longitude: 79.8612 },
+      locationName: 'Galle Face Green, Colombo',
+      district: 'Colombo',
+      isManualLocation: false,
+      submitterId: 'test-user-citizen-colombo',
+      submitterName: 'Kamal Perera',
+      submitterRole: 'citizen',
+      status: 'rejected',
+      hazardEventId: null,
+      hazardEventTitle: null,
+      verifiedBy: 'system-seed-officer',
+      verifiedByName: 'DMC Verification Desk',
+      verificationDecision:
+        'Does not qualify as immediate hazard observation. Official coastal advisory already issued.',
+      infoRequestedMessage: null,
+      additionalInfo: null,
+    },
+  ],
 };
 
 /**
@@ -456,6 +561,7 @@ export async function seedFirestoreDatabase(): Promise<{
   teams: number;
   supplies: number;
   distributions: number;
+  groundReports: number;
 }> {
   // 1. Hazard Events
   for (const item of SEED_DATA.hazardEvents) {
@@ -526,6 +632,17 @@ export async function seedFirestoreDatabase(): Promise<{
     });
   }
 
+  // 8. Ground Reports (UC02)
+  for (const item of SEED_DATA.groundReports) {
+    await setDoc(doc(db, 'groundReports', item.id), {
+      ...item,
+      captureTime: serverTimestamp(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ...(item.status === 'verified' ? { verificationTimestamp: serverTimestamp() } : {}),
+    });
+  }
+
   return {
     events: SEED_DATA.hazardEvents.length,
     warnings: SEED_DATA.warnings.length,
@@ -534,6 +651,7 @@ export async function seedFirestoreDatabase(): Promise<{
     teams: SEED_DATA.rescueTeams.length,
     supplies: SEED_DATA.reliefSupplies.length,
     distributions: SEED_DATA.distributions.length,
+    groundReports: SEED_DATA.groundReports.length,
   };
 }
 

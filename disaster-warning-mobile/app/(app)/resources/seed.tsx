@@ -33,6 +33,7 @@ export default function SeedScreen() {
     teams: number;
     supplies: number;
     distributions: number;
+    groundReports?: number;
   } | null>(null);
 
   useEffect(() => {
@@ -54,7 +55,7 @@ export default function SeedScreen() {
       setAlreadySeeded(true);
       Alert.alert(
         'Database Synchronized',
-        `Successfully populated:\n• ${res.events} Hazard Events\n• ${res.shelters} Safe Shelters\n• ${res.teams} SAR Units\n• ${res.supplies} Relief Stocks\n• ${res.distributions} Distribution Records\n\nAuthentic Sri Lankan emergency telemetry is online.`,
+        `Successfully populated:\n• ${res.events} Hazard Events\n• ${res.shelters} Safe Shelters\n• ${res.teams} SAR Units\n• ${res.supplies} Relief Stocks\n• ${res.distributions} Distribution Records\n• ${res.groundReports} Ground Reports (UC02)\n\nAuthentic Sri Lankan emergency telemetry is online.`,
       );
     } catch (error) {
       Alert.alert(
