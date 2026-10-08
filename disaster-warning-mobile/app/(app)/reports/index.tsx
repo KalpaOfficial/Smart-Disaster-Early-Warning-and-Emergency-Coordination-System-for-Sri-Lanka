@@ -19,9 +19,12 @@ import { ScreenContainer } from '@/components/ScreenContainer';
 import { ReportCard } from '@/components/ReportCard';
 import { ReportDetailModal } from '@/components/ReportDetailModal';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
+import { InAppNotificationBanner } from '@/components/InAppNotificationBanner';
 import { EmptyState } from '@/components/EmptyState';
 import { Colors, BorderRadius, Spacing, FontSize } from '@/constants/colors';
 import { useAuth } from '@/hooks/useAuth';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
+import { useReportNotifications } from '@/hooks/useReportNotifications';
 import {
   getMyReports,
   getPendingReports,
@@ -33,7 +36,6 @@ import {
 } from '@/services/groundReportService';
 import { getActiveEvents } from '@/services/hazardEventService';
 import { getOfflineQueueCount } from '@/services/offlineQueueService';
-import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import {
   subscribeToSyncProgress,
   triggerSyncNow,
@@ -58,6 +60,12 @@ export default function ReportListScreen() {
   const canSubmit = user?.role === 'citizen' || user?.role === 'volunteer';
 
   const { isOffline } = useNetworkStatus();
+  const {
+    activeNotification,
+    dismissNotification,
+    refreshNotifications,
+  } = useReportNotifications();
+
   const [reports, setReports] = useState<GroundReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -131,9 +139,14 @@ export default function ReportListScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([fetchReports(), fetchOfflineCount(), fetchActiveEvents()]);
+    await Promise.all([
+      fetchReports(),
+      fetchOfflineCount(),
+      fetchActiveEvents(),
+      refreshNotifications(),
+    ]);
     setRefreshing(false);
-  }, [fetchReports, fetchOfflineCount, fetchActiveEvents]);
+  }, [fetchReports, fetchOfflineCount, fetchActiveEvents, refreshNotifications]);
 
   const handleReportPress = (report: GroundReport) => {
     setSelectedReport(report);
@@ -201,6 +214,18 @@ export default function ReportListScreen() {
           <Text style={styles.headerSubtitle}>{headerSubtitle}</Text>
         </View>
       </View>
+
+      {/* In-App Status Notification Feedback Banner */}
+      {activeNotification && !isOfficer && (
+        <InAppNotificationBanner
+          notification={activeNotification}
+          onPress={() => {
+            router.push(`/(app)/reports/${activeNotification.reportId}` as never);
+            dismissNotification(activeNotification);
+          }}
+          onDismiss={() => dismissNotification(activeNotification)}
+        />
+      )}
 
       {/* Offline Indicator */}
       <OfflineIndicator

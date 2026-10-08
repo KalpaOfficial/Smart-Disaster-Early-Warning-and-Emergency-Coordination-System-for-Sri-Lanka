@@ -131,3 +131,19 @@ export interface GroundReportStats {
   infoRequested: number;
   offlineQueued: number;
 }
+
+/**
+ * In-App Notification emitted when officer verifies, rejects, or requests info on a report.
+ * (UC02 Phase 6 Submitter Feedback)
+ */
+export interface ReportNotification {
+  id: string;
+  reportId: string;
+  referenceNumber: string;
+  status: ReportStatus;
+  title: string;
+  message: string;
+  timestamp: string;
+  officerName?: string | null;
+  hazardEventTitle?: string | null;
+}
