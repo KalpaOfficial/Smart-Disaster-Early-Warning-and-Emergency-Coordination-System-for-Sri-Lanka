@@ -27,6 +27,7 @@ interface ReportDetailModalProps {
   visible: boolean;
   report: GroundReport | null;
   onClose: () => void;
+  onOpenFullScreen?: (reportId: string) => void;
   isOfficer?: boolean;
   activeEvents?: HazardEvent[];
   onVerify?: (
@@ -44,6 +45,7 @@ export function ReportDetailModal({
   visible,
   report,
   onClose,
+  onOpenFullScreen,
   isOfficer = false,
   activeEvents = [],
   onVerify,
@@ -146,13 +148,25 @@ export function ReportDetailModal({
         <View style={styles.sheetContainer}>
           {/* Header Bar */}
           <View style={styles.headerBar}>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.refTitle}>{report.referenceNumber}</Text>
               <Text style={styles.headerSubtitle}>Ground Hazard Observation</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
-              <Ionicons name="close" size={20} color={Colors.text.secondary} />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
+              {onOpenFullScreen && (
+                <TouchableOpacity
+                  onPress={() => onOpenFullScreen(report.id)}
+                  style={styles.closeBtn}
+                  activeOpacity={0.7}
+                  accessibilityLabel="Open full screen"
+                >
+                  <Ionicons name="open-outline" size={18} color={Colors.accent.primary} />
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
+                <Ionicons name="close" size={20} color={Colors.text.secondary} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
