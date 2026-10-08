@@ -354,9 +354,9 @@ export default function DashboardScreen() {
         {/* Live Active Emergency Event & Warning Hero Card */}
         {(() => {
           const topWarning = warnings[0];
-          const displayTitle = topWarning?.title || activeHazardEvent?.title || 'No Active Disaster Declared';
+          const displayTitle = topWarning?.headline || activeHazardEvent?.title || 'No Active Disaster Declared';
           const displayDesc = topWarning?.instructions || activeHazardEvent?.description || 'All provincial meteorological and flood monitoring stations are within baseline thresholds.';
-          const displayDistricts = topWarning?.targetDistricts?.length ? topWarning.targetDistricts : affectedDistricts;
+          const displayDistricts: string[] = topWarning?.targetAreas?.length ? topWarning.targetAreas : affectedDistricts;
           const displayBadge = topWarning
             ? `${topWarning.severity.toUpperCase()} ALERT • ${topWarning.hazardType.toUpperCase()}`
             : activeHazardEvent
@@ -386,7 +386,7 @@ export default function DashboardScreen() {
                 <Text style={styles.heroAlertDescription}>{displayDesc}</Text>
 
                 <View style={styles.districtChipsRow}>
-                  {displayDistricts.map((d) => (
+                  {displayDistricts.map((d: string) => (
                     <View key={d} style={styles.districtChip}>
                       <Ionicons name="location-sharp" size={11} color={Colors.accent.primary} />
                       <Text style={styles.districtChipText}>{d}</Text>
