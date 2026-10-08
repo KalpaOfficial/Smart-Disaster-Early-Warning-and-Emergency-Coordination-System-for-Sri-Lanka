@@ -26,6 +26,13 @@ const NAV_ITEMS: NavItem[] = [
     activeIconName: 'grid',
   },
   {
+    key: 'reports',
+    label: 'Reports',
+    route: '/(app)/reports',
+    iconName: 'document-text-outline',
+    activeIconName: 'document-text',
+  },
+  {
     key: 'shelters',
     label: 'Shelters',
     route: '/(app)/resources/shelters',

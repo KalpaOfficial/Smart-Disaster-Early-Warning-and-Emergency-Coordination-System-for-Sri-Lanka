@@ -1,10 +1,11 @@
 /**
- * Authenticated app layout — main navigation structure.
+ * Reports Route Layout — Stack Navigator for Ground Hazard Reports.
+ * Manages transitions between report list, submit form, detail view, and offline queue.
  */
 import { Stack } from 'expo-router';
 import { Colors } from '@/constants/colors';
 
-export default function AppLayout() {
+export default function ReportsLayout() {
   return (
     <Stack
       screenOptions={{
@@ -14,9 +15,9 @@ export default function AppLayout() {
       }}
     >
       <Stack.Screen name="index" />
-      <Stack.Screen name="resources" />
-      <Stack.Screen name="warnings" />
-      <Stack.Screen name="reports" />
+      <Stack.Screen name="submit" />
+      <Stack.Screen name="[reportId]" />
+      <Stack.Screen name="offline-queue" />
     </Stack>
   );
 }
