@@ -20,7 +20,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import NetInfo from '@react-native-community/netinfo';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { ScreenContainer } from '@/components/ScreenContainer';
 import { ObservationTypeBadge } from '@/components/ObservationTypeBadge';
 import { EmptyState } from '@/components/EmptyState';
@@ -42,20 +42,9 @@ export default function OfflineQueueScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncingItemId, setSyncingItemId] = useState<string | null>(null);
-  const [isOnline, setIsOnline] = useState<boolean | null>(null);
 
-  // Monitor network connectivity in real-time
-  useEffect(() => {
-    NetInfo.fetch().then((state) => {
-      setIsOnline(Boolean(state.isConnected && state.isInternetReachable !== false));
-    });
-
-    const unsubscribe = NetInfo.addEventListener((state) => {
-      setIsOnline(Boolean(state.isConnected && state.isInternetReachable !== false));
-    });
-
-    return () => unsubscribe();
-  }, []);
+  // Monitor network connectivity in real-time via hook
+  const { isOnline } = useNetworkStatus();
 
   const loadQueue = useCallback(async () => {
     try {
