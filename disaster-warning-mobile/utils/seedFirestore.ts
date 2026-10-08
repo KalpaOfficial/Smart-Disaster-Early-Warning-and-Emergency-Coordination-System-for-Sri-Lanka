@@ -91,6 +91,72 @@ export const SEED_DATA = {
     },
   ],
 
+  users: [
+    {
+      id: 'test-user-dmc-officer',
+      email: 'officer@dmc.gov.lk',
+      fullName: 'Kamal Fernando (DMC Duty Officer)',
+      role: 'dmc_officer',
+      district: 'Colombo',
+      phone: '+94771234567',
+      organisation: 'Disaster Management Centre',
+    },
+    {
+      id: 'test-user-citizen-ratnapura',
+      email: 'sunil.ratnapura@gmail.com',
+      fullName: 'Sunil Ratnayake',
+      role: 'citizen',
+      district: 'Ratnapura',
+      phone: '+94714567890',
+      organisation: 'Citizen',
+    },
+    {
+      id: 'test-user-citizen-kalutara',
+      email: 'anusha.kalutara@gmail.com',
+      fullName: 'Anusha Perera',
+      role: 'citizen',
+      district: 'Kalutara',
+      phone: '+94772345678',
+      organisation: 'Citizen',
+    },
+    {
+      id: 'test-user-citizen-colombo',
+      email: 'nimal.colombo@gmail.com',
+      fullName: 'Nimal De Silva',
+      role: 'citizen',
+      district: 'Colombo',
+      phone: '+94763456789',
+      organisation: 'Citizen',
+    },
+    {
+      id: 'test-user-citizen-gampaha',
+      email: 'priyantha.gampaha@gmail.com',
+      fullName: 'Priyantha Wickramasinghe',
+      role: 'citizen',
+      district: 'Gampaha',
+      phone: '+94704567890',
+      organisation: 'Citizen',
+    },
+    {
+      id: 'test-user-citizen-kegalle',
+      email: 'bandara.kegalle@gmail.com',
+      fullName: 'Bandara Jayawardena',
+      role: 'citizen',
+      district: 'Kegalle',
+      phone: '+94785678901',
+      organisation: 'Citizen',
+    },
+    {
+      id: 'test-user-citizen-badulla',
+      email: 'saman.badulla@gmail.com',
+      fullName: 'Saman Kumara',
+      role: 'citizen',
+      district: 'Badulla',
+      phone: '+94756789012',
+      organisation: 'Citizen',
+    },
+  ],
+
   shelters: [
     {
       id: 'shelter-ratnapura-bodhiraja',
@@ -385,6 +451,7 @@ export const SEED_DATA = {
 export async function seedFirestoreDatabase(): Promise<{
   events: number;
   warnings: number;
+  users: number;
   shelters: number;
   teams: number;
   supplies: number;
@@ -451,9 +518,18 @@ export async function seedFirestoreDatabase(): Promise<{
     });
   }
 
+  // 7. Test Users for Recipient & Role Testing (UC01)
+  for (const item of SEED_DATA.users) {
+    await setDoc(doc(db, 'users', item.id), {
+      ...item,
+      createdAt: serverTimestamp(),
+    });
+  }
+
   return {
     events: SEED_DATA.hazardEvents.length,
     warnings: SEED_DATA.warnings.length,
+    users: SEED_DATA.users.length,
     shelters: SEED_DATA.shelters.length,
     teams: SEED_DATA.rescueTeams.length,
     supplies: SEED_DATA.reliefSupplies.length,

@@ -27,8 +27,10 @@ function mapEventDoc(docSnap: QueryDocumentSnapshot<DocumentData>): HazardEvent 
     id: docSnap.id,
     title: d.title || '',
     hazardType: d.hazardType || 'flood',
+    warningLevel: d.warningLevel || 'Level 4 Alert',
     status: d.status || 'active',
     affectedDistricts: d.affectedDistricts || [],
+    affectedRiverBasins: d.affectedRiverBasins || [],
     startDate: d.startDate?.toDate?.()?.toISOString() || new Date().toISOString(),
     description: d.description || '',
   };
