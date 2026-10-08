@@ -104,6 +104,21 @@ export const Colors = {
     blankets: '#A78BFA',
     tents: '#10B981',
   },
+
+  // Ground report specific tokens (UC02)
+  report: {
+    pending: '#F59E0B',
+    verified: '#10B981',
+    rejected: '#EF4444',
+    infoRequested: '#38BDF8',
+  },
+
+  observation: {
+    risingWater: '#38BDF8',
+    blockedRoad: '#F59E0B',
+    landslideCrack: '#EF4444',
+    other: '#A78BFA',
+  },
 } as const;
 
 export const Spacing = {
