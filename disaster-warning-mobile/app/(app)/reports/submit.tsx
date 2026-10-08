@@ -28,6 +28,7 @@ import { ReportStatusBadge } from '@/components/ReportStatusBadge';
 import { Colors, BorderRadius, Spacing, FontSize } from '@/constants/colors';
 import { OBSERVATION_TYPES } from '@/constants/observationTypes';
 import { useAuth } from '@/hooks/useAuth';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { submitGroundReport } from '@/services/groundReportService';
 import { uploadGroundReportPhoto } from '@/services/photoUploadService';
 import { queueOfflineReport } from '@/services/offlineQueueService';
@@ -39,6 +40,7 @@ export default function SubmitReportScreen() {
   const { state: authState } = useAuth();
   const router = useRouter();
   const user = authState.user;
+  const { isOffline } = useNetworkStatus();
 
   // Multi-step state
   const [currentStep, setCurrentStep] = useState(1);
@@ -498,6 +500,16 @@ export default function SubmitReportScreen() {
           </View>
         </View>
 
+        {/* Offline indicator banner */}
+        {isOffline && (
+          <View style={styles.offlineBanner}>
+            <Ionicons name="cloud-offline" size={14} color="#F59E0B" />
+            <Text style={styles.offlineBannerText}>
+              Offline mode: Report will be queued locally and automatically uploaded when connected.
+            </Text>
+          </View>
+        )}
+
         {/* Step Content */}
         <ScrollView
           style={styles.scrollView}
@@ -870,5 +882,21 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: '600',
     color: Colors.text.secondary,
+  },
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(245, 158, 11, 0.25)',
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.xs + 2,
+  },
+  offlineBannerText: {
+    fontSize: FontSize.micro,
+    color: '#F59E0B',
+    fontWeight: '600',
+    flex: 1,
   },
 });

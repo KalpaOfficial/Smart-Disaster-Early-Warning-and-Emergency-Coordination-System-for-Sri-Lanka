@@ -33,6 +33,11 @@ import {
 } from '@/services/groundReportService';
 import { getActiveEvents } from '@/services/hazardEventService';
 import { getOfflineQueueCount } from '@/services/offlineQueueService';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
+import {
+  subscribeToSyncProgress,
+  triggerSyncNow,
+} from '@/services/offlineSyncManager';
 import type { GroundReport, ReportStatus } from '@/types/groundReport';
 import type { HazardEvent } from '@/types/resources';
 
@@ -52,6 +57,7 @@ export default function ReportListScreen() {
   const isOfficer = user?.role === 'dmc_officer';
   const canSubmit = user?.role === 'citizen' || user?.role === 'volunteer';
 
+  const { isOffline } = useNetworkStatus();
   const [reports, setReports] = useState<GroundReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -111,6 +117,17 @@ export default function ReportListScreen() {
       });
     return () => { mounted = false; };
   }, [fetchReports, fetchOfflineCount, fetchActiveEvents]);
+
+  // Subscribe to background synchronization events
+  useEffect(() => {
+    const unsubscribe = subscribeToSyncProgress((event) => {
+      if (event.state === 'completed' || event.state === 'syncing') {
+        fetchReports();
+        fetchOfflineCount();
+      }
+    });
+    return () => unsubscribe();
+  }, [fetchReports, fetchOfflineCount]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -187,7 +204,12 @@ export default function ReportListScreen() {
 
       {/* Offline Indicator */}
       <OfflineIndicator
+        isOffline={isOffline}
         queueCount={offlineCount}
+        onPressSync={async () => {
+          await triggerSyncNow();
+          await Promise.all([fetchReports(), fetchOfflineCount()]);
+        }}
         onPressQueue={() => router.push('/(app)/reports/offline-queue' as never)}
       />
 
