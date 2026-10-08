@@ -263,6 +263,7 @@ export default function IssueHazardWarningScreen() {
 
       const result = await createWarningWithDispatch(
         {
+          eventId: selectedEvent?.id || '',
           hazardEventId: selectedEvent?.id || '',
           hazardEventTitle: selectedEvent?.title || '',
           hazardType,
@@ -273,6 +274,7 @@ export default function IssueHazardWarningScreen() {
           recipientCount,
           headline: headline.trim(),
           instructions: instructions.trim(),
+          channels: deliveryChannels,
           deliveryChannels,
         },
         issuerUid,
@@ -562,7 +564,7 @@ export default function IssueHazardWarningScreen() {
                 <View style={styles.cardFooter}>
                   <View style={styles.metaCol}>
                     <Text style={styles.metaIssuer}>{w.issuedByName}</Text>
-                    <Text style={styles.metaTime}>Issued: {new Date(w.issuedAt).toLocaleString()}</Text>
+                    <Text style={styles.metaTime}>Issued: {new Date(w.dispatchedAt || w.createdAt).toLocaleString()}</Text>
                   </View>
                   {isDmcOfficer && w.status !== 'cancelled' ? (
                     <TouchableOpacity style={styles.cancelBtn} onPress={() => handleCancelWarning(w.id)}>

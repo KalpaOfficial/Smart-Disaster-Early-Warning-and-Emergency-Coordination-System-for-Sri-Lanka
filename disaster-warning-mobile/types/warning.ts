@@ -1,7 +1,6 @@
 /**
  * Hazard Warning types for UC01: Issue Hazard Warning.
- * Follows the 20-step business workflow, channel delivery simulation,
- * recipient deduplication, and river basin target resolution.
+ * Strictly aligned with approved Cloud Firestore schema specifications.
  */
 import type { HazardType } from './resources';
 
@@ -25,8 +24,10 @@ export interface ChannelDeliveryResult {
 
 export interface HazardWarning {
   id: string;
-  hazardEventId: string;
-  hazardEventTitle: string;
+  warningId: string;
+  eventId: string;
+  hazardEventId?: string;
+  hazardEventTitle?: string;
   hazardType: HazardType;
   severity: WarningSeverity;
   targetMode: TargetMode;
@@ -35,17 +36,21 @@ export interface HazardWarning {
   recipientCount: number;
   headline: string;
   instructions: string;
-  deliveryChannels: DeliveryChannel[];
+  channels: DeliveryChannel[];
+  deliveryChannels?: DeliveryChannel[];
   channelResults?: ChannelDeliveryResult[];
   status: WarningStatus;
-  issuedByUid: string;
-  issuedByName: string;
-  issuedAt: string;
+  issuedBy: string;
+  issuedByUid?: string;
+  issuedByName?: string;
+  createdAt: string;
+  dispatchedAt?: string;
   updatedAt?: string;
 }
 
 export interface CreateWarningPayload {
-  hazardEventId: string;
+  eventId: string;
+  hazardEventId?: string;
   hazardEventTitle: string;
   hazardType: HazardType;
   severity: WarningSeverity;
@@ -55,7 +60,20 @@ export interface CreateWarningPayload {
   recipientCount: number;
   headline: string;
   instructions: string;
-  deliveryChannels: DeliveryChannel[];
+  channels: DeliveryChannel[];
+  deliveryChannels?: DeliveryChannel[];
+}
+
+export interface DeliveryLog {
+  logId: string;
+  warningId: string;
+  channel: DeliveryChannel;
+  recipientCount: number;
+  deliveredCount: number;
+  failedCount: number;
+  status: 'success' | 'failed' | 'partial';
+  errorMessage?: string;
+  timestamp: string;
 }
 
 export interface VerifiedGroundReportStub {

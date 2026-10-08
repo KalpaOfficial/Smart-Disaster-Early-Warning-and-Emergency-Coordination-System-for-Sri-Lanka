@@ -18,6 +18,8 @@ export interface HazardEvent {
   hazardType: HazardType;
   status: EventStatus;
   affectedDistricts: string[];
+  affectedRiverBasins?: string[];
+  warningLevel?: string;
   startDate: string;
   description: string;
 }
