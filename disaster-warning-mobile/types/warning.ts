@@ -15,9 +15,20 @@ export type WarningStatus =
   | 'failed'
   | 'cancelled';
 
+export type ChannelDeliveryStatus = 'Success' | 'Partial' | 'Failed';
+
+export interface ChannelResult {
+  channel: DeliveryChannel;
+  recipientCount: number;
+  deliveredCount: number;
+  failedCount: number;
+  status: ChannelDeliveryStatus;
+  errorMessage?: string;
+}
+
 export interface ChannelDeliveryResult {
   channel: DeliveryChannel;
-  status: 'success' | 'failed';
+  status: 'success' | 'failed' | 'Success' | 'Partial' | 'Failed';
   recipientCount: number;
   errorMessage?: string;
 }
