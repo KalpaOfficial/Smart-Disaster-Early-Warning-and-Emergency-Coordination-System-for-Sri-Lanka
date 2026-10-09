@@ -630,7 +630,12 @@ export default function DashboardScreen() {
 
                   <TouchableOpacity
                     style={styles.bannerActionBtnSecondary}
-                    onPress={() => router.push('/(app)/reports' as never)}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/(app)/reports',
+                        params: { tab: 'my_reports' },
+                      } as never)
+                    }
                     activeOpacity={0.8}
                   >
                     <Ionicons name="document-text-outline" size={15} color={Colors.accent.primary} />
@@ -810,11 +815,20 @@ export default function DashboardScreen() {
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>LATEST VERIFIED GROUND REPORTS</Text>
           <TouchableOpacity
-            onPress={() => router.push('/(app)/reports' as never)}
+            onPress={() => {
+              if (user?.role === 'dmc_officer') {
+                router.push('/(app)/reports' as never);
+              } else {
+                router.push({
+                  pathname: '/(app)/reports',
+                  params: { tab: 'verified' },
+                } as never);
+              }
+            }}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Text style={styles.viewAllLink}>
-              {user?.role === 'dmc_officer' ? 'Full Queue →' : 'All Reports →'}
+              {user?.role === 'dmc_officer' ? 'Full Queue →' : 'All Verified Reports →'}
             </Text>
           </TouchableOpacity>
         </View>
