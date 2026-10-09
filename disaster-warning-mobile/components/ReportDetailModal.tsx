@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { ReportStatusBadge } from './ReportStatusBadge';
 import { ObservationTypeBadge } from './ObservationTypeBadge';
 import { Colors, BorderRadius, Spacing, FontSize } from '@/constants/colors';
@@ -57,6 +58,7 @@ export function ReportDetailModal({
   onRequestInfo,
   onSubmitAdditionalInfo,
 }: ReportDetailModalProps) {
+  const router = useRouter();
   const [actionLoading, setActionLoading] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string>('');
   const [decisionText, setDecisionText] = useState('');
@@ -84,10 +86,27 @@ export function ReportDetailModal({
         ev?.title || null,
         decisionText || 'Verified by DMC Duty Officer.',
       );
-      Alert.alert('Report Verified', 'The report has been verified and attached as supporting evidence.');
+      const targetReportId = report.id;
       setActiveAction(null);
       setDecisionText('');
       onClose();
+
+      Alert.alert(
+        'Report Verified',
+        'The report has been officially verified. Would you like to issue an emergency hazard warning based on this report?',
+        [
+          {
+            text: 'Issue Warning Now',
+            onPress: () => {
+              router.push({
+                pathname: '/(app)/warnings/compose',
+                params: { reportId: targetReportId },
+              } as never);
+            },
+          },
+          { text: 'Done', style: 'cancel' },
+        ],
+      );
     } catch (err) {
       Alert.alert('Verification Error', (err as Error)?.message || 'Failed to verify report.');
     } finally {
@@ -306,6 +325,26 @@ export function ReportDetailModal({
                     </Text>
                   )}
                 </View>
+
+                {isOfficer && (
+                  <TouchableOpacity
+                    style={styles.issueHazardWarningModalBtn}
+                    onPress={() => {
+                      const repId = report.id;
+                      onClose();
+                      router.push({
+                        pathname: '/(app)/warnings/compose',
+                        params: { reportId: repId },
+                      } as never);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="warning" size={16} color="#080C14" />
+                    <Text style={styles.issueHazardWarningModalBtnText}>
+                      Issue Hazard Warning from Report
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
 
@@ -938,5 +977,21 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: FontSize.xs,
     fontWeight: '700',
+  },
+  issueHazardWarningModalBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    backgroundColor: Colors.accent.primary,
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.sm,
+    marginTop: Spacing.sm,
+  },
+  issueHazardWarningModalBtnText: {
+    color: '#080C14',
+    fontSize: FontSize.xs,
+    fontWeight: '800',
   },
 });

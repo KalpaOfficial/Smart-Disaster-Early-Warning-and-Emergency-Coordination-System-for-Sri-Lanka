@@ -44,10 +44,11 @@ import {
 import type { GroundReport } from '@/types/groundReport';
 import type { HazardEvent } from '@/types/resources';
 
-type OfficerTab = 'pending' | 'info_requested' | 'all';
+type OfficerTab = 'pending' | 'verified' | 'info_requested' | 'all';
 
 const OFFICER_TABS: { key: OfficerTab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'pending', label: 'Pending', icon: 'time-outline' },
+  { key: 'verified', label: 'Verified', icon: 'checkmark-circle-outline' },
   { key: 'info_requested', label: 'Info Req.', icon: 'help-circle-outline' },
   { key: 'all', label: 'All', icon: 'list-outline' },
 ];
@@ -88,6 +89,8 @@ export default function ReportListScreen() {
       if (isOfficer) {
         if (activeTab === 'pending') {
           data = await getPendingReports();
+        } else if (activeTab === 'verified') {
+          data = await getAllReports({ status: 'verified' });
         } else if (activeTab === 'info_requested') {
           data = await getAllReports({ status: 'info_requested' });
         } else {
