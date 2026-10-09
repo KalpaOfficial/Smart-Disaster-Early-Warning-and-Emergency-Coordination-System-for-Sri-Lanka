@@ -33,6 +33,7 @@ import {
   getGroundReportStats,
   getMyReports,
   getPendingReports,
+  getAllReports,
 } from '@/services/groundReportService';
 import { getOfflineQueueCount } from '@/services/offlineQueueService';
 import type {
@@ -66,6 +67,7 @@ export default function DashboardScreen() {
     offlineQueued: 0,
   });
   const [recentReports, setRecentReports] = useState<GroundReport[]>([]);
+  const [latestVerifiedReports, setLatestVerifiedReports] = useState<GroundReport[]>([]);
   const [myReportsCount, setMyReportsCount] = useState(0);
   const [offlineCount, setOfflineCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -73,7 +75,7 @@ export default function DashboardScreen() {
 
   const loadDashboardData = useCallback(async () => {
     try {
-      const [evts, warnList, shs, tms, sups, dists, rStats, offCount] = await Promise.all([
+      const [evts, warnList, shs, tms, sups, dists, rStats, offCount, verifiedList] = await Promise.all([
         getActiveEvents(),
         getActiveWarnings(),
         getShelters(),
@@ -89,6 +91,7 @@ export default function DashboardScreen() {
           offlineQueued: 0,
         })),
         getOfflineQueueCount().catch(() => 0),
+        getAllReports({ status: 'verified' }).catch(() => []),
       ]);
       setActiveEvents(evts);
       setWarnings(warnList);
@@ -98,6 +101,7 @@ export default function DashboardScreen() {
       setDistributions(dists);
       setReportStats(rStats);
       setOfflineCount(offCount);
+      setLatestVerifiedReports(verifiedList.slice(0, 3));
 
       if (user?.role === 'dmc_officer') {
         const pending = await getPendingReports().catch(() => []);
@@ -112,7 +116,7 @@ export default function DashboardScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     loadDashboardData();
@@ -467,17 +471,8 @@ export default function DashboardScreen() {
         })()}
 
         {/* Ground Hazard Report (UC02) Quick Action Banner */}
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() =>
-            router.push(
-              (user?.role === 'dmc_officer'
-                ? '/(app)/reports'
-                : '/(app)/reports/submit') as never,
-            )
-          }
-          style={styles.groundReportBanner}
-        >
+        {/* Ground Hazard Report (UC02) Quick Action Banner */}
+        <View style={styles.groundReportBanner}>
           <LinearGradient
             colors={
               user?.role === 'dmc_officer'
@@ -488,72 +483,116 @@ export default function DashboardScreen() {
             end={{ x: 1, y: 1 }}
             style={styles.groundReportBannerInner}
           >
-            <View
-              style={[
-                styles.groundReportIconBox,
-                {
-                  backgroundColor:
-                    user?.role === 'dmc_officer'
-                      ? 'rgba(56, 189, 248, 0.2)'
-                      : 'rgba(16, 185, 129, 0.2)',
-                },
-              ]}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => router.push('/(app)/reports' as never)}
+              style={styles.groundReportTopRow}
             >
+              <View
+                style={[
+                  styles.groundReportIconBox,
+                  {
+                    backgroundColor:
+                      user?.role === 'dmc_officer'
+                        ? 'rgba(56, 189, 248, 0.2)'
+                        : 'rgba(16, 185, 129, 0.2)',
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={user?.role === 'dmc_officer' ? 'shield-checkmark' : 'camera'}
+                  size={24}
+                  color={user?.role === 'dmc_officer' ? '#38BDF8' : '#10B981'}
+                />
+              </View>
+              <View style={styles.groundReportContent}>
+                <View style={styles.groundReportPillRow}>
+                  <Text
+                    style={[
+                      styles.groundReportPill,
+                      {
+                        color:
+                          user?.role === 'dmc_officer' ? '#38BDF8' : '#10B981',
+                        backgroundColor:
+                          user?.role === 'dmc_officer'
+                            ? 'rgba(56, 189, 248, 0.15)'
+                            : 'rgba(16, 185, 129, 0.15)',
+                      },
+                    ]}
+                  >
+                    {user?.role === 'dmc_officer'
+                      ? 'DUTY OFFICER VERIFICATION'
+                      : 'GROUND HAZARD OBSERVATION (UC02)'}
+                  </Text>
+                  {offlineCount > 0 && (
+                    <TouchableOpacity
+                      style={styles.offlineAlertBadge}
+                      onPress={() => router.push('/(app)/reports/offline-queue' as never)}
+                    >
+                      <Ionicons name="cloud-offline" size={10} color="#F59E0B" />
+                      <Text style={styles.offlineAlertBadgeText}>
+                        {offlineCount} Queued
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <Text style={styles.groundReportTitle}>
+                  {user?.role === 'dmc_officer'
+                    ? `${reportStats.pending} Report${reportStats.pending !== 1 ? 's' : ''} Awaiting Review`
+                    : 'Submit & Track Field Observations'}
+                </Text>
+                <Text style={styles.groundReportDesc}>
+                  {user?.role === 'dmc_officer'
+                    ? 'Assess incoming evidence photos and coordinates, and link to active hazard events.'
+                    : 'Report rising floodwaters, road blockages, or landslide cracks with photo & GPS.'}
+                </Text>
+              </View>
               <Ionicons
-                name={user?.role === 'dmc_officer' ? 'shield-checkmark' : 'camera'}
-                size={24}
+                name="chevron-forward"
+                size={20}
                 color={user?.role === 'dmc_officer' ? '#38BDF8' : '#10B981'}
               />
-            </View>
-            <View style={styles.groundReportContent}>
-              <View style={styles.groundReportPillRow}>
-                <Text
-                  style={[
-                    styles.groundReportPill,
-                    {
-                      color:
-                        user?.role === 'dmc_officer' ? '#38BDF8' : '#10B981',
-                      backgroundColor:
-                        user?.role === 'dmc_officer'
-                          ? 'rgba(56, 189, 248, 0.15)'
-                          : 'rgba(16, 185, 129, 0.15)',
-                    },
-                  ]}
+            </TouchableOpacity>
+
+            {/* Role-Specific Quick Action Buttons (UC02 Phase 7.2) */}
+            <View style={styles.bannerActionRow}>
+              {user?.role === 'dmc_officer' ? (
+                <TouchableOpacity
+                  style={styles.bannerActionBtnPrimary}
+                  onPress={() => router.push('/(app)/reports' as never)}
+                  activeOpacity={0.8}
                 >
-                  {user?.role === 'dmc_officer'
-                    ? 'DUTY OFFICER VERIFICATION'
-                    : 'GROUND HAZARD OBSERVATION (UC02)'}
-                </Text>
-                {offlineCount > 0 && (
+                  <Ionicons name="list" size={15} color="#080C14" />
+                  <Text style={styles.bannerActionBtnPrimaryText}>
+                    Open Verification Queue ({reportStats.pending})
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <>
                   <TouchableOpacity
-                    style={styles.offlineAlertBadge}
-                    onPress={() => router.push('/(app)/reports/offline-queue' as never)}
+                    style={styles.bannerActionBtnPrimary}
+                    onPress={() => router.push('/(app)/reports/submit' as never)}
+                    activeOpacity={0.8}
                   >
-                    <Ionicons name="cloud-offline" size={10} color="#F59E0B" />
-                    <Text style={styles.offlineAlertBadgeText}>
-                      {offlineCount} Queued
+                    <Ionicons name="camera" size={15} color="#080C14" />
+                    <Text style={styles.bannerActionBtnPrimaryText}>Submit Report</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.bannerActionBtnSecondary}
+                    onPress={() => router.push('/(app)/reports' as never)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="document-text-outline" size={15} color={Colors.accent.primary} />
+                    <Text style={styles.bannerActionBtnSecondaryText}>
+                      My Reports ({myReportsCount})
                     </Text>
                   </TouchableOpacity>
-                )}
-              </View>
-              <Text style={styles.groundReportTitle}>
-                {user?.role === 'dmc_officer'
-                  ? `${reportStats.pending} Report${reportStats.pending !== 1 ? 's' : ''} Awaiting Review`
-                  : 'Submit Ground Hazard Report'}
-              </Text>
-              <Text style={styles.groundReportDesc}>
-                {user?.role === 'dmc_officer'
-                  ? 'Assess incoming evidence photos and coordinates, and link to active hazard events.'
-                  : 'Report rising floodwaters, blocked roads, or landslide cracks with photo & GPS.'}
-              </Text>
+                </>
+              )}
             </View>
-            <Ionicons
-              name="chevron-forward"
-              size={20}
-              color={user?.role === 'dmc_officer' ? '#38BDF8' : '#10B981'}
-            />
           </LinearGradient>
-        </TouchableOpacity>
+        </View>
 
         {/* Rapid KPI Telemetry Grid — 100% Real Firestore Data */}
         <View style={styles.sectionHeaderRow}>
@@ -690,6 +729,90 @@ export default function DashboardScreen() {
             <Text style={styles.kpiLabel}>Live Firestore DB</Text>
             <Text style={styles.kpiSub}>Real-Time Sync</Text>
           </Card>
+        </View>
+
+        {/* Latest Verified Reports Summary (UC02 Phase 7.2) */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>LATEST VERIFIED GROUND REPORTS</Text>
+          <TouchableOpacity
+            onPress={() => router.push('/(app)/reports' as never)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.viewAllLink}>
+              {user?.role === 'dmc_officer' ? 'Full Queue →' : 'All Reports →'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.verifiedReportsContainer}>
+          {latestVerifiedReports.length > 0 ? (
+            latestVerifiedReports.map((report) => (
+              <Card
+                key={report.id}
+                style={styles.verifiedSummaryCard}
+                onPress={() => router.push(`/(app)/reports/${report.id}` as never)}
+                glowColor={Colors.report.verified}
+              >
+                <View style={styles.verifiedSummaryHeader}>
+                  <View style={styles.verifiedSummaryRefRow}>
+                    <Ionicons name="document-text-outline" size={13} color={Colors.accent.primary} />
+                    <Text style={styles.verifiedSummaryRef}>#{report.referenceNumber}</Text>
+                    <View style={styles.verifiedBadgeMini}>
+                      <Ionicons name="checkmark-circle" size={11} color={Colors.status.success} />
+                      <Text style={styles.verifiedBadgeMiniText}>VERIFIED</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.verifiedSummaryTime}>
+                    {new Date(report.captureTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+                </View>
+
+                <Text style={styles.verifiedSummaryDesc} numberOfLines={2}>
+                  {report.description}
+                </Text>
+
+                <View style={styles.verifiedSummaryFooter}>
+                  <View style={styles.verifiedSummaryLocation}>
+                    <Ionicons name="location-sharp" size={12} color={Colors.accent.primary} />
+                    <Text style={styles.verifiedSummaryLocationText} numberOfLines={1}>
+                      {report.locationName} • <Text style={styles.verifiedDistrictHighlight}>{report.district}</Text>
+                    </Text>
+                  </View>
+
+                  {report.hazardEventTitle ? (
+                    <View style={styles.verifiedEventPill}>
+                      <Ionicons name="link-outline" size={10} color={Colors.accent.primary} />
+                      <Text style={styles.verifiedEventPillText} numberOfLines={1}>
+                        {report.hazardEventTitle}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {report.verifiedByName && (
+                  <View style={styles.verifiedReviewerRow}>
+                    <Text style={styles.verifiedReviewerText}>
+                      Verified by <Text style={{ color: Colors.text.secondary }}>{report.verifiedByName}</Text>
+                    </Text>
+                    <View style={styles.viewReportAction}>
+                      <Text style={styles.viewReportActionText}>View Details</Text>
+                      <Ionicons name="chevron-forward" size={12} color={Colors.accent.primary} />
+                    </View>
+                  </View>
+                )}
+              </Card>
+            ))
+          ) : (
+            <Card style={styles.emptyVerifiedCard}>
+              <Ionicons name="shield-checkmark-outline" size={28} color={Colors.text.tertiary} />
+              <Text style={styles.emptyVerifiedTitle}>No Verified Field Reports Yet</Text>
+              <Text style={styles.emptyVerifiedDesc}>
+                {user?.role === 'dmc_officer'
+                  ? 'Assess incoming citizen observations from the verification queue to link verified records here.'
+                  : 'Hazard reports verified by Disaster Management Centre officers will appear here.'}
+              </Text>
+            </Card>
+          )}
         </View>
 
         {/* Tactical Modules */}
@@ -913,10 +1036,188 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   groundReportBannerInner: {
+    padding: Spacing.lg,
+  },
+  groundReportTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: Spacing.lg,
     gap: Spacing.md,
+  },
+  bannerActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingTop: Spacing.md,
+    marginTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  bannerActionBtnPrimary: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Colors.accent.primary,
+    paddingVertical: Spacing.sm + 2,
+    borderRadius: BorderRadius.md,
+  },
+  bannerActionBtnPrimaryText: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: '#080C14',
+  },
+  bannerActionBtnSecondary: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+    paddingVertical: Spacing.sm + 2,
+    borderRadius: BorderRadius.md,
+  },
+  bannerActionBtnSecondaryText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.accent.primary,
+  },
+  viewAllLink: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.accent.primary,
+  },
+  verifiedReportsContainer: {
+    gap: Spacing.md,
+    marginBottom: Spacing.xxl,
+  },
+  verifiedSummaryCard: {
+    padding: Spacing.md,
+  },
+  verifiedSummaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.xs,
+  },
+  verifiedSummaryRefRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  verifiedSummaryRef: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.accent.primary,
+    letterSpacing: 0.5,
+  },
+  verifiedBadgeMini: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.xs,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  verifiedBadgeMiniText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: Colors.status.success,
+  },
+  verifiedSummaryTime: {
+    fontSize: FontSize.micro,
+    color: Colors.text.tertiary,
+  },
+  verifiedSummaryDesc: {
+    fontSize: FontSize.sm,
+    color: Colors.text.primary,
+    lineHeight: 19,
+    marginBottom: Spacing.sm,
+  },
+  verifiedSummaryFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: Spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+    gap: Spacing.sm,
+  },
+  verifiedSummaryLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flex: 1,
+  },
+  verifiedSummaryLocationText: {
+    fontSize: FontSize.xs,
+    color: Colors.text.secondary,
+  },
+  verifiedDistrictHighlight: {
+    color: Colors.accent.primary,
+    fontWeight: '600',
+  },
+  verifiedEventPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.xs,
+    maxWidth: 140,
+  },
+  verifiedEventPillText: {
+    fontSize: 10,
+    color: Colors.accent.primary,
+    fontWeight: '600',
+  },
+  verifiedReviewerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: Spacing.xs + 2,
+  },
+  verifiedReviewerText: {
+    fontSize: FontSize.micro,
+    color: Colors.text.tertiary,
+    fontStyle: 'italic',
+  },
+  viewReportAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  viewReportActionText: {
+    fontSize: FontSize.micro,
+    color: Colors.accent.primary,
+    fontWeight: '700',
+  },
+  emptyVerifiedCard: {
+    padding: Spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  emptyVerifiedTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: '800',
+    color: Colors.text.secondary,
+  },
+  emptyVerifiedDesc: {
+    fontSize: FontSize.xs,
+    color: Colors.text.tertiary,
+    textAlign: 'center',
+    lineHeight: 16,
+    maxWidth: 320,
   },
   groundReportIconBox: {
     width: 44,
