@@ -82,7 +82,7 @@ export interface DeliveryLog {
   recipientCount: number;
   deliveredCount: number;
   failedCount: number;
-  status: 'success' | 'failed' | 'partial';
+  status: ChannelDeliveryStatus | 'success' | 'failed' | 'partial';
   errorMessage?: string;
   timestamp: string;
 }

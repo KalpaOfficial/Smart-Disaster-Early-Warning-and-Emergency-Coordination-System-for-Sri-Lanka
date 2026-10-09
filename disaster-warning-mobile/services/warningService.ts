@@ -136,6 +136,50 @@ export async function getDeliveryLogsForWarning(warningId: string): Promise<Deli
 }
 
 /**
+ * Saves individual Cloud Firestore delivery log documents for each selected delivery channel.
+ * Strictly linked to `warningId` with server timestamps and failure preservation.
+ */
+export async function saveDeliveryLogs(
+  warningId: string,
+  channelResults: ChannelResult[],
+): Promise<DeliveryLog[]> {
+  const savedLogs: DeliveryLog[] = [];
+
+  for (const chResult of channelResults) {
+    try {
+      const logData = {
+        warningId,
+        channel: chResult.channel,
+        recipientCount: chResult.recipientCount,
+        deliveredCount: chResult.deliveredCount,
+        failedCount: chResult.failedCount,
+        status: chResult.status,
+        errorMessage: chResult.errorMessage || null,
+        timestamp: serverTimestamp(),
+      };
+
+      const docRef = await addDoc(collection(db, DELIVERY_LOGS_COLLECTION), logData);
+
+      savedLogs.push({
+        logId: docRef.id,
+        warningId,
+        channel: chResult.channel,
+        recipientCount: chResult.recipientCount,
+        deliveredCount: chResult.deliveredCount,
+        failedCount: chResult.failedCount,
+        status: chResult.status,
+        errorMessage: chResult.errorMessage,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn(`Notice creating delivery log for channel ${chResult.channel}:`, err);
+    }
+  }
+
+  return savedLogs;
+}
+
+/**
  * Fetch verified ground reports for a specific hazard event (UC01 Step 2).
  */
 export async function getGroundReportsForEvent(
@@ -284,6 +328,7 @@ export interface WarningDispatchPipelineResult {
   finalStatus: WarningStatus;
   recipientCount: number;
   channelResults: ChannelResult[];
+  deliveryLogs: DeliveryLog[];
   summary: MultiChannelDeliverySummary;
 }
 
@@ -378,22 +423,7 @@ export async function executeWarningDispatchPipeline(
   );
 
   // 8. Save per-channel delivery logs to Cloud Firestore `deliveryLogs` collection
-  for (const chResult of summary.channelResults) {
-    try {
-      await addDoc(collection(db, DELIVERY_LOGS_COLLECTION), {
-        warningId,
-        channel: chResult.channel,
-        recipientCount: chResult.recipientCount,
-        deliveredCount: chResult.deliveredCount,
-        failedCount: chResult.failedCount,
-        status: chResult.status,
-        errorMessage: chResult.errorMessage || null,
-        timestamp: serverTimestamp(),
-      });
-    } catch (err) {
-      console.warn(`Notice saving delivery log for channel ${chResult.channel}:`, err);
-    }
-  }
+  const deliveryLogs = await saveDeliveryLogs(warningId, summary.channelResults);
 
   // 9. Calculate final warning status:
   // - All succeed -> 'delivered'
@@ -428,6 +458,7 @@ export async function executeWarningDispatchPipeline(
     finalStatus,
     recipientCount,
     channelResults: summary.channelResults,
+    deliveryLogs,
     summary,
   };
 }
