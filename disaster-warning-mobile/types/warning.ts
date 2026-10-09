@@ -54,6 +54,8 @@ export interface HazardWarning {
   issuedBy: string;
   issuedByUid?: string;
   issuedByName?: string;
+  sourceReportId?: string;
+  sourceReportRef?: string;
   createdAt: string;
   dispatchedAt?: string;
   updatedAt?: string;
@@ -63,6 +65,8 @@ export interface CreateWarningPayload {
   eventId: string;
   hazardEventId?: string;
   hazardEventTitle: string;
+  sourceReportId?: string;
+  sourceReportRef?: string;
   hazardType: HazardType;
   severity: WarningSeverity;
   targetMode: TargetMode;

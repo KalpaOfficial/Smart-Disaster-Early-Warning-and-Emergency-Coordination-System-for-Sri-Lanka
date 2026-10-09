@@ -36,6 +36,7 @@ import { FormModal } from '@/components/FormModal';
 import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/colors';
 import { SRI_LANKAN_DISTRICTS } from '@/constants/districts';
 import { SRI_LANKA_RIVER_BASINS } from '@/constants/riverBasins';
+import { getReportById } from '@/services/groundReportService';
 import { getHazardEvent } from '@/services/hazardEventService';
 import { resolveRecipients } from '@/services/recipientService';
 import {
@@ -43,6 +44,7 @@ import {
   type WarningDispatchPipelineResult,
 } from '@/services/warningService';
 import type { ChannelExecutionOptions } from '@/services/deliveryService';
+import type { GroundReport } from '@/types/groundReport';
 import type { HazardEvent, HazardType } from '@/types/resources';
 import type {
   WarningSeverity,
@@ -63,16 +65,36 @@ const AVAILABLE_CHANNELS: { id: DeliveryChannel; label: string; icon: keyof type
   { id: 'audible', label: 'Audible Siren', icon: 'volume-high', desc: 'Emergency siren sound broadcast' },
 ];
 
+const mapObservationToHazardType = (obsType?: string): HazardType => {
+  switch (obsType?.toLowerCase()) {
+    case 'flooding':
+    case 'flood':
+      return 'flood';
+    case 'landslide':
+      return 'landslide';
+    case 'tsunami':
+      return 'tsunami';
+    case 'cyclone':
+    case 'high_winds':
+      return 'cyclone';
+    case 'coastal_erosion':
+      return 'coastal_erosion';
+    default:
+      return 'flood';
+  }
+};
+
 export default function WarningComposerScreen() {
-  const { eventId } = useLocalSearchParams<{ eventId?: string }>();
+  const { eventId, reportId } = useLocalSearchParams<{ eventId?: string; reportId?: string }>();
   const router = useRouter();
   const { state } = useAuth();
   const user = state.user;
 
   const isDmcOfficer = user?.role === 'dmc_officer';
 
-  // Selected Hazard Event State
+  // Selected Hazard Event & Source Ground Report State
   const [event, setEvent] = useState<HazardEvent | null>(null);
+  const [sourceReport, setSourceReport] = useState<GroundReport | null>(null);
   const [loadingEvent, setLoadingEvent] = useState(true);
   const [eventError, setEventError] = useState<string | null>(null);
 
@@ -99,51 +121,76 @@ export default function WarningComposerScreen() {
   const [showPayloadModal, setShowPayloadModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Fetch Event from Cloud Firestore by ID
-  const fetchEvent = useCallback(async () => {
-    if (!eventId) {
-      setLoadingEvent(false);
-      setEventError('No hazard event ID specified.');
-      return;
-    }
-
+  // Fetch Event and/or Source Ground Report from Cloud Firestore
+  const fetchSourceData = useCallback(async () => {
     setLoadingEvent(true);
     setEventError(null);
 
-    try {
-      const fetchedEvent = await getHazardEvent(eventId);
-      if (fetchedEvent) {
-        setEvent(fetchedEvent);
-        setHazardType(fetchedEvent.hazardType);
+    let loadedReport: GroundReport | null = null;
+    let targetEventId = eventId;
 
-        // Pre-fill target areas from event if available
-        if (fetchedEvent.affectedDistricts && fetchedEvent.affectedDistricts.length > 0) {
-          setTargetAreas(fetchedEvent.affectedDistricts);
+    if (reportId) {
+      try {
+        loadedReport = await getReportById(reportId);
+        if (loadedReport) {
+          setSourceReport(loadedReport);
+          const mappedType = mapObservationToHazardType(loadedReport.observationType);
+          setHazardType(mappedType);
           setTargetMode('district');
-        } else if (fetchedEvent.affectedRiverBasins && fetchedEvent.affectedRiverBasins.length > 0) {
-          setTargetAreas(fetchedEvent.affectedRiverBasins);
-          setTargetMode('river_basin');
+          if (loadedReport.district) {
+            setTargetAreas([loadedReport.district]);
+          }
+          setHeadline(`EMERGENCY ALERT: ${mappedType.toUpperCase()} Warning — ${loadedReport.district || 'Target Area'}`);
+          setInstructions(
+            `Verified citizen hazard observation (${loadedReport.referenceNumber}) at ${loadedReport.locationName || loadedReport.district}: "${loadedReport.description}". Residents are advised to stay vigilant and follow emergency safety instructions.`
+          );
+          if (loadedReport.hazardEventId) {
+            targetEventId = loadedReport.hazardEventId;
+          }
         }
-
-        // Pre-fill smart defaults for headline & instructions
-        setHeadline(`EMERGENCY ALERT: Severe ${fetchedEvent.hazardType.toUpperCase()} Warning`);
-        setInstructions(
-          `Residents in targeted areas must move to higher ground immediately. Follow official instructions from DMC duty officers.`
-        );
-      } else {
-        setEventError(`Hazard event matching ID "${eventId}" was not found.`);
+      } catch (err) {
+        console.warn('Failed to load source ground report:', err);
       }
-    } catch (err) {
-      console.error('Error fetching hazard event for composer:', err);
-      setEventError('Failed to load hazard event from Cloud Firestore.');
-    } finally {
-      setLoadingEvent(false);
     }
-  }, [eventId]);
+
+    if (targetEventId) {
+      try {
+        const fetchedEvent = await getHazardEvent(targetEventId);
+        if (fetchedEvent) {
+          setEvent(fetchedEvent);
+          if (!loadedReport) {
+            setHazardType(fetchedEvent.hazardType);
+            if (fetchedEvent.affectedDistricts && fetchedEvent.affectedDistricts.length > 0) {
+              setTargetAreas(fetchedEvent.affectedDistricts);
+              setTargetMode('district');
+            } else if (fetchedEvent.affectedRiverBasins && fetchedEvent.affectedRiverBasins.length > 0) {
+              setTargetAreas(fetchedEvent.affectedRiverBasins);
+              setTargetMode('river_basin');
+            }
+            setHeadline(`EMERGENCY ALERT: Severe ${fetchedEvent.hazardType.toUpperCase()} Warning`);
+            setInstructions(
+              `Residents in targeted areas must move to higher ground immediately. Follow official instructions from DMC duty officers.`
+            );
+          }
+        } else if (!loadedReport) {
+          setEventError(`Hazard event matching ID "${targetEventId}" was not found.`);
+        }
+      } catch (err) {
+        console.error('Error fetching hazard event for composer:', err);
+        if (!loadedReport) {
+          setEventError('Failed to load hazard event from Cloud Firestore.');
+        }
+      }
+    } else if (!loadedReport && !eventId) {
+      setEventError('No hazard event or ground report specified for warning creation.');
+    }
+
+    setLoadingEvent(false);
+  }, [eventId, reportId]);
 
   useEffect(() => {
-    fetchEvent();
-  }, [fetchEvent]);
+    fetchSourceData();
+  }, [fetchSourceData]);
 
   // Recipient Resolution Effect: Triggered when targetMode or targetAreas change
   useEffect(() => {
@@ -240,9 +287,11 @@ export default function WarningComposerScreen() {
 
     try {
       const payload: CreateWarningPayload = {
-        eventId: event?.id || eventId || '',
-        hazardEventId: event?.id || eventId || '',
-        hazardEventTitle: event?.title || 'Open Hazard Event',
+        eventId: event?.id || eventId || sourceReport?.hazardEventId || '',
+        hazardEventId: event?.id || eventId || sourceReport?.hazardEventId || '',
+        hazardEventTitle: event?.title || (sourceReport ? `Report #${sourceReport.referenceNumber}` : 'Open Hazard Event'),
+        sourceReportId: sourceReport?.id,
+        sourceReportRef: sourceReport?.referenceNumber,
         hazardType,
         severity: severity as WarningSeverity,
         targetMode,
@@ -342,24 +391,47 @@ export default function WarningComposerScreen() {
             <Text style={styles.stateTitle}>Loading Hazard Event...</Text>
             <Text style={styles.stateDesc}>Fetching document from Cloud Firestore.</Text>
           </Card>
-        ) : eventError && !event ? (
+        ) : eventError && !event && !sourceReport ? (
           /* Error State */
           <Card style={styles.errorCard}>
             <Ionicons name="alert-circle" size={36} color={Colors.danger} />
-            <Text style={styles.errorTitle}>Event Selection Error</Text>
+            <Text style={styles.errorTitle}>Selection Error</Text>
             <Text style={styles.errorDesc}>{eventError}</Text>
-            <Button title="Back to Events" variant="secondary" size="sm" onPress={() => router.back()} />
+            <Button title="Back" variant="secondary" size="sm" onPress={() => router.back()} />
           </Card>
         ) : (
           /* Form Content */
           <>
+            {/* Source Ground Report Banner */}
+            {sourceReport && (
+              <LinearGradient
+                colors={['#064E3B', '#0F172A']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.heroBanner}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <Ionicons name="shield-checkmark" size={16} color={Colors.status.success} />
+                  <Text style={[styles.heroSub, { color: Colors.status.success }]}>
+                    PRE-FILLED FROM VERIFIED GROUND REPORT #{sourceReport.referenceNumber}
+                  </Text>
+                </View>
+                <Text style={styles.heroTitle}>
+                  {sourceReport.district} — {sourceReport.observationType.toUpperCase()}
+                </Text>
+                <Text style={styles.heroDesc} numberOfLines={2}>
+                  Location: {sourceReport.locationName} • &quot;{sourceReport.description}&quot;
+                </Text>
+              </LinearGradient>
+            )}
+
             {/* Context Card: Target Event Telemetry */}
             {event && (
               <LinearGradient
                 colors={['#1E1B4B', '#0F172A']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={styles.heroBanner}
+                style={[styles.heroBanner, sourceReport ? { marginTop: Spacing.sm } : undefined]}
               >
                 <Text style={styles.heroSub}>TARGET HAZARD EVENT</Text>
                 <Text style={styles.heroTitle}>{event.title}</Text>

@@ -151,7 +151,21 @@ export default function ReportDetailScreen() {
           decisionNote: decisionText || 'Verified by DMC Duty Officer.',
         },
       );
-      Alert.alert('Report Verified', 'The observation has been officially verified and linked.');
+      Alert.alert(
+        'Report Verified',
+        'The observation has been officially verified. Would you like to issue an emergency hazard warning based on this report?',
+        [
+          {
+            text: 'Issue Warning Now',
+            onPress: () =>
+              router.push({
+                pathname: '/(app)/warnings/compose',
+                params: { reportId: report.id },
+              } as never),
+          },
+          { text: 'Done', style: 'cancel' },
+        ],
+      );
       setActiveAction(null);
       setDecisionText('');
       await loadData();
@@ -540,6 +554,22 @@ export default function ReportDetailScreen() {
                 </Text>
               )}
             </View>
+
+            {(isOfficer || user?.role === 'dmc_officer') && (
+              <TouchableOpacity
+                style={styles.issueHazardWarningBtn}
+                onPress={() =>
+                  router.push({
+                    pathname: '/(app)/warnings/compose',
+                    params: { reportId: report.id },
+                  } as never)
+                }
+                activeOpacity={0.8}
+              >
+                <Ionicons name="warning" size={18} color="#080C14" />
+                <Text style={styles.issueHazardWarningBtnText}>Issue Hazard Warning from Report</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -1350,5 +1380,21 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     marginTop: Spacing.md,
     textAlign: 'center',
+  },
+  issueHazardWarningBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    backgroundColor: Colors.accent.primary,
+    paddingVertical: Spacing.md - 2,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+    marginTop: Spacing.md,
+  },
+  issueHazardWarningBtnText: {
+    color: '#080C14',
+    fontSize: FontSize.sm,
+    fontWeight: '800',
   },
 });
