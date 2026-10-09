@@ -1,5 +1,6 @@
 # Node / Dependencies
 node_modules/
+coverage/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -45,3 +46,5 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+guidelines/
