@@ -330,7 +330,7 @@ export default function WarningComposerScreen() {
             <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
           </TouchableOpacity>
           <View style={styles.navTitleBox}>
-            <Text style={styles.navPill}>UC01 — DISASTER WARNING COMPOSER</Text>
+            <Text style={styles.navPill}>DISASTER WARNING COMPOSER</Text>
             <Text style={styles.navTitle}>Issue Warning</Text>
           </View>
         </View>

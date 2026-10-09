@@ -212,7 +212,7 @@ export default function WarningDeliverySummaryScreen() {
             <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
           </TouchableOpacity>
           <View style={styles.navTitleBox}>
-            <Text style={styles.navPill}>UC01 — DISPATCH OUTCOME</Text>
+            <Text style={styles.navPill}>DISPATCH OUTCOME</Text>
             <Text style={styles.navTitle}>Delivery Summary</Text>
           </View>
         </View>
