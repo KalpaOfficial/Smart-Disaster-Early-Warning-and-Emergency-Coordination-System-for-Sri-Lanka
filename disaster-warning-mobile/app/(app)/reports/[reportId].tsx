@@ -279,6 +279,33 @@ export default function ReportDetailScreen() {
     );
   }
 
+  // Privacy & Access Restriction: Unverified reports are restricted to DMC Officers and the original submitter
+  const canView = isOfficer || isSubmitter || report.status === 'verified';
+  if (!canView) {
+    return (
+      <ScreenContainer>
+        <View style={styles.headerBar}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="arrow-back" size={24} color={Colors.text.primary} />
+          </TouchableOpacity>
+          <Text style={styles.headerBarTitle}>Access Restricted</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <EmptyState
+          iconName="shield-outline"
+          title="Under Verification Review"
+          message="This ground hazard observation is currently pending official verification by DMC Duty Officers and is not publicly visible yet."
+          actionTitle="Back to Reports"
+          onAction={() => router.back()}
+        />
+      </ScreenContainer>
+    );
+  }
+
   const formattedCaptureTime = new Date(report.captureTime).toLocaleString('en-US', {
     dateStyle: 'medium',
     timeStyle: 'short',

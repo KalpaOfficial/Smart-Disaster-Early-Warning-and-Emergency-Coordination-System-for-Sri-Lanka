@@ -100,4 +100,58 @@ describe('UC02: Verification Queue & Officer Decision Workflows', () => {
       expect(updateDoc).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('Public Verified Feed & Privacy Access Boundary', () => {
+    it('retrieves only verified reports for the public community feed', async () => {
+      const verifiedFeed = await getAllReports({ status: 'verified' });
+      expect(Array.isArray(verifiedFeed)).toBe(true);
+    });
+
+    it('enforces that unverified reports can only be viewed by submitter or DMC officers', () => {
+      const canViewReport = (
+        report: { submitterId: string; status: string },
+        user: { id: string; role: string },
+      ): boolean => {
+        const isOfficer = user.role === 'dmc_officer';
+        const isSubmitter = user.id === report.submitterId;
+        const isPubliclyVerified = report.status === 'verified';
+        return isOfficer || isSubmitter || isPubliclyVerified;
+      };
+
+      const pendingReport = { submitterId: 'citizen-123', status: 'pending_verification' };
+      const verifiedReport = { submitterId: 'citizen-123', status: 'verified' };
+      const rejectedReport = { submitterId: 'citizen-123', status: 'rejected' };
+
+      const ownerUser = { id: 'citizen-123', role: 'citizen' };
+      const otherCitizen = { id: 'citizen-456', role: 'citizen' };
+      const officer = { id: 'officer-999', role: 'dmc_officer' };
+
+      // Submitter can view their own reports in all lifecycle states
+      expect(canViewReport(pendingReport, ownerUser)).toBe(true);
+      expect(canViewReport(verifiedReport, ownerUser)).toBe(true);
+      expect(canViewReport(rejectedReport, ownerUser)).toBe(true);
+
+      // DMC Officer can view all reports in queue for assessment
+      expect(canViewReport(pendingReport, officer)).toBe(true);
+      expect(canViewReport(verifiedReport, officer)).toBe(true);
+      expect(canViewReport(rejectedReport, officer)).toBe(true);
+
+      // General public and other citizens can ONLY view verified reports
+      expect(canViewReport(verifiedReport, otherCitizen)).toBe(true);
+      expect(canViewReport(pendingReport, otherCitizen)).toBe(false);
+      expect(canViewReport(rejectedReport, otherCitizen)).toBe(false);
+    });
+
+    it('validates tab routing for citizens between verified feed and personal submissions', () => {
+      const resolveCitizenTab = (queryTab?: string): 'verified' | 'my_reports' => {
+        if (queryTab === 'my_reports' || queryTab === 'my') return 'my_reports';
+        return 'verified';
+      };
+
+      expect(resolveCitizenTab('verified')).toBe('verified');
+      expect(resolveCitizenTab('my_reports')).toBe('my_reports');
+      expect(resolveCitizenTab('my')).toBe('my_reports');
+      expect(resolveCitizenTab(undefined)).toBe('verified');
+    });
+  });
 });

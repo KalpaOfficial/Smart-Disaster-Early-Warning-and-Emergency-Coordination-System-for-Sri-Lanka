@@ -156,6 +156,20 @@ export default function LoginScreen() {
               style={styles.submitBtn}
             />
 
+            {/* Quick Demo Preset Button */}
+            <TouchableOpacity
+              style={styles.quickPresetBtn}
+              onPress={() => {
+                setEmail('dmc.officer@dmc.gov.lk');
+                setPassword('DmcOfficer123!');
+                setErrors({});
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="flash" size={14} color={Colors.accent.primary} />
+              <Text style={styles.quickPresetText}>Quick Fill DMC Duty Officer Credentials</Text>
+            </TouchableOpacity>
+
             {/* Live Cloud Firebase Notice */}
             <View style={styles.firebaseNoticeBox}>
               <View style={styles.firebaseNoticeHeader}>
@@ -163,7 +177,7 @@ export default function LoginScreen() {
                 <Text style={styles.firebaseNoticeTitle}>SECURE FIREBASE AUTHENTICATION</Text>
               </View>
               <Text style={styles.firebaseNoticeDesc}>
-                Authentication connects directly to Google Cloud Firebase &amp; Firestore. If you have not registered an officer account yet, create one below.
+                Authentication connects directly to Google Cloud Firebase &amp; Firestore. First-time officer sign-ins automatically provision a DMC Officer profile.
               </Text>
             </View>
 
@@ -303,7 +317,25 @@ const styles = StyleSheet.create({
   },
   submitBtn: {
     marginTop: Spacing.sm,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.md,
+  },
+  quickPresetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    backgroundColor: 'rgba(56, 189, 248, 0.10)',
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.25)',
+    marginBottom: Spacing.lg,
+  },
+  quickPresetText: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.accent.primary,
   },
   firebaseNoticeBox: {
     backgroundColor: '#0A1322',

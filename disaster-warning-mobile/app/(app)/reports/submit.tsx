@@ -243,7 +243,12 @@ export default function SubmitReportScreen() {
 
           <TouchableOpacity
             style={styles.successBtn}
-            onPress={() => router.replace('/(app)/reports' as never)}
+            onPress={() =>
+              router.replace({
+                pathname: '/(app)/reports',
+                params: { tab: 'my_reports' },
+              } as never)
+            }
             activeOpacity={0.85}
           >
             <Ionicons name="list" size={16} color="#080C14" />

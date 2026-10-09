@@ -35,17 +35,17 @@ export function Input({
 
   return (
     <View style={[styles.container, containerStyle]}>
-      {label && <Text style={styles.label}>{label}</Text>}
+      {Boolean(label) && <Text style={styles.label}>{label}</Text>}
       <View
         style={[
           styles.inputWrapper,
           isFocused ? styles.focused : undefined,
-          error ? styles.errored : undefined,
+          Boolean(error) ? styles.errored : undefined,
         ]}
       >
-        {icon && <View style={styles.iconWrapper}>{icon}</View>}
+        {Boolean(icon) && <View style={styles.iconWrapper}>{icon}</View>}
         <TextInput
-          style={[styles.input, icon ? styles.inputWithIcon : undefined]}
+          style={[styles.input, Boolean(icon) ? styles.inputWithIcon : undefined]}
           placeholderTextColor={Colors.input.placeholder}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
@@ -66,7 +66,7 @@ export function Input({
           </TouchableOpacity>
         )}
       </View>
-      {error && <Text style={styles.errorText}>{error}</Text>}
+      {Boolean(error) && <Text style={styles.errorText}>{error}</Text>}
     </View>
   );
 }

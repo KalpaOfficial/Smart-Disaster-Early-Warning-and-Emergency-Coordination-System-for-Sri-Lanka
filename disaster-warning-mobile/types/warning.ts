@@ -15,9 +15,20 @@ export type WarningStatus =
   | 'failed'
   | 'cancelled';
 
+export type ChannelDeliveryStatus = 'Success' | 'Partial' | 'Failed';
+
+export interface ChannelResult {
+  channel: DeliveryChannel;
+  recipientCount: number;
+  deliveredCount: number;
+  failedCount: number;
+  status: ChannelDeliveryStatus;
+  errorMessage?: string;
+}
+
 export interface ChannelDeliveryResult {
   channel: DeliveryChannel;
-  status: 'success' | 'failed';
+  status: 'success' | 'failed' | 'Success' | 'Partial' | 'Failed';
   recipientCount: number;
   errorMessage?: string;
 }
@@ -39,6 +50,7 @@ export interface HazardWarning {
   channels: DeliveryChannel[];
   deliveryChannels?: DeliveryChannel[];
   channelResults?: ChannelDeliveryResult[];
+  previousWarningId?: string | null;
   status: WarningStatus;
   issuedBy: string;
   issuedByUid?: string;
@@ -62,6 +74,7 @@ export interface CreateWarningPayload {
   instructions: string;
   channels: DeliveryChannel[];
   deliveryChannels?: DeliveryChannel[];
+  previousWarningId?: string | null;
 }
 
 export interface DeliveryLog {
@@ -71,7 +84,7 @@ export interface DeliveryLog {
   recipientCount: number;
   deliveredCount: number;
   failedCount: number;
-  status: 'success' | 'failed' | 'partial';
+  status: ChannelDeliveryStatus | 'success' | 'failed' | 'partial';
   errorMessage?: string;
   timestamp: string;
 }

@@ -94,29 +94,106 @@ export async function createHazardEvent(
   return docRef.id;
 }
 
+export interface EventTimelineEntry {
+  id: string;
+  eventId: string;
+  warningId?: string;
+  reportId?: string;
+  eventType: string;
+  type?: string;
+  severity?: string;
+  headline: string;
+  summary?: string;
+  issuedBy?: string;
+  timestamp: string;
+}
+
 /**
  * Attach an issued warning to the hazard event timeline (UC01 Step 20).
+ * Appends entry to `timeline` array on `hazardEvents/{eventId}` document
+ * AND writes to `hazardEvents/{eventId}/timeline` subcollection.
  */
 export async function attachWarningToTimeline(
   hazardEventId: string,
   warningId: string,
   headline: string,
+  severity?: string,
+  issuedBy?: string,
 ): Promise<void> {
   if (!hazardEventId) return;
   try {
     const eventRef = doc(db, COLLECTION, hazardEventId);
+
+    const timelineEntry: EventTimelineEntry = {
+      id: `timeline-warn-${warningId}`,
+      eventId: hazardEventId,
+      warningId,
+      eventType: 'WARNING_ISSUED',
+      type: 'WARNING_ISSUED',
+      severity: severity || 'warning',
+      headline: headline.trim(),
+      summary: headline.trim(),
+      issuedBy: issuedBy || 'DMC Duty Officer',
+      timestamp: new Date().toISOString(),
+    };
+
+    // 1. Update `timeline` array field on the `hazardEvents` document
     await updateDoc(eventRef, {
-      timeline: arrayUnion({
-        id: `timeline-warn-${warningId}`,
-        type: 'warning_issued',
-        warningId,
-        headline,
-        timestamp: new Date().toISOString(),
-      }),
+      timeline: arrayUnion(timelineEntry),
       updatedAt: serverTimestamp(),
     });
+
+    // 2. Store document in `hazardEvents/{eventId}/timeline` subcollection
+    const subcollRef = collection(db, `${COLLECTION}/${hazardEventId}/timeline`);
+    await addDoc(subcollRef, timelineEntry);
   } catch (error) {
     console.warn('Notice attaching warning to timeline:', error);
+  }
+}
+
+/**
+ * Fetch timeline entries for a specific hazard event.
+ * Retrieves from the `timeline` array on the event document as well as the subcollection.
+ */
+export async function getEventTimeline(hazardEventId: string): Promise<EventTimelineEntry[]> {
+  if (!hazardEventId) return [];
+  try {
+    const entries: EventTimelineEntry[] = [];
+
+    // Fetch from event document `timeline` array
+    const eventSnap = await getDoc(doc(db, COLLECTION, hazardEventId));
+    if (eventSnap.exists()) {
+      const data = eventSnap.data();
+      if (Array.isArray(data.timeline)) {
+        entries.push(...data.timeline);
+      }
+    }
+
+    // Fetch from subcollection
+    const subcollRef = collection(db, `${COLLECTION}/${hazardEventId}/timeline`);
+    const subSnap = await getDocs(subcollRef);
+    subSnap.docs.forEach((d) => {
+      const itemData = d.data();
+      if (!entries.some((e) => e.id === d.id || e.warningId === itemData.warningId)) {
+        entries.push({
+          id: d.id,
+          eventId: itemData.eventId || hazardEventId,
+          warningId: itemData.warningId,
+          reportId: itemData.reportId,
+          eventType: itemData.eventType || itemData.type || 'WARNING_ISSUED',
+          severity: itemData.severity,
+          headline: itemData.headline || itemData.summary || '',
+          summary: itemData.summary || itemData.headline || '',
+          issuedBy: itemData.issuedBy,
+          timestamp: itemData.timestamp || new Date().toISOString(),
+        });
+      }
+    });
+
+    return entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  } catch (error) {
+    console.warn('Notice fetching event timeline:', error);
+    return [];
   }
 }
 
