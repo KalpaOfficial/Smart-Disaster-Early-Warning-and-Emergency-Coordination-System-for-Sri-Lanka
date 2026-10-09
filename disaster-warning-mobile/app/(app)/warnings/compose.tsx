@@ -38,7 +38,10 @@ import { SRI_LANKAN_DISTRICTS } from '@/constants/districts';
 import { SRI_LANKA_RIVER_BASINS } from '@/constants/riverBasins';
 import { getHazardEvent } from '@/services/hazardEventService';
 import { resolveRecipients } from '@/services/recipientService';
-import { createWarningDocument } from '@/services/warningService';
+import {
+  executeWarningDispatchPipeline,
+  type WarningDispatchPipelineResult,
+} from '@/services/warningService';
 import type { HazardEvent, HazardType } from '@/types/resources';
 import type {
   WarningSeverity,
@@ -90,6 +93,7 @@ export default function WarningComposerScreen() {
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [preparedPayload, setPreparedPayload] = useState<CreateWarningPayload | null>(null);
   const [createdWarningId, setCreatedWarningId] = useState<string | null>(null);
+  const [pipelineResult, setPipelineResult] = useState<WarningDispatchPipelineResult | null>(null);
   const [showPayloadModal, setShowPayloadModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -246,9 +250,16 @@ export default function WarningComposerScreen() {
         deliveryChannels,
       };
 
-      // 1-6. Re-resolve recipients on backend/service layer, prevent dispatch if recipient count is zero,
-      // create warning document in Cloud Firestore with initial status "dispatching", and return document ID.
-      const result = await createWarningDocument(
+      // Execute End-to-End UC01 Warning Creation & Multi-Channel Dispatch Pipeline:
+      // 1. Validate mandatory information
+      // 2. Resolve recipients again on service layer
+      // 3. Abort if recipient count is zero
+      // 4. Create warning document with status "dispatching"
+      // 5. Run selected delivery channels (sendPush, sendSMS, sendAudible) with fault isolation
+      // 6. Save individual per-channel delivery logs in `deliveryLogs` collection
+      // 7. Calculate final warning status ('delivered', 'partially_failed', or 'failed')
+      // 8. Update warning document status in Cloud Firestore
+      const result = await executeWarningDispatchPipeline(
         payload,
         user?.id || user?.email || 'dmc-officer',
         user?.fullName || 'DMC Duty Officer',
@@ -256,6 +267,7 @@ export default function WarningComposerScreen() {
 
       setPreparedPayload(payload);
       setCreatedWarningId(result.warningId);
+      setPipelineResult(result);
       setShowPayloadModal(true);
     } catch (err: unknown) {
       const errorMsg = (err as Error).message || 'Failed to create warning document in Cloud Firestore.';
@@ -545,20 +557,56 @@ export default function WarningComposerScreen() {
         )}
       </ScrollView>
 
-      {/* Created Warning Document Modal */}
+      {/* Warning Dispatch Execution Summary Modal */}
       {preparedPayload && (
         <FormModal
           visible={showPayloadModal}
           onClose={() => setShowPayloadModal(false)}
-          title="Warning Created in Firestore"
+          title="Warning Dispatch Execution Summary"
         >
           <View style={styles.payloadBox}>
             <Text style={styles.helperText}>
-              Warning document created in Cloud Firestore with status &quot;dispatching&quot;.
+              Warning document created in Cloud Firestore and dispatched across selected channels.
             </Text>
+
             <View style={styles.payloadHeader}>
-              <Ionicons name="checkmark-circle" size={20} color={Colors.success} />
-              <Text style={styles.payloadHeaderText}>DOCUMENT CREATED • STATUS: DISPATCHING</Text>
+              <Ionicons
+                name={
+                  pipelineResult?.finalStatus === 'delivered'
+                    ? 'checkmark-circle'
+                    : pipelineResult?.finalStatus === 'partially_failed'
+                    ? 'warning'
+                    : 'close-circle'
+                }
+                size={20}
+                color={
+                  pipelineResult?.finalStatus === 'delivered'
+                    ? Colors.success
+                    : pipelineResult?.finalStatus === 'partially_failed'
+                    ? Colors.warning
+                    : Colors.danger
+                }
+              />
+              <Text
+                style={[
+                  styles.payloadHeaderText,
+                  {
+                    color:
+                      pipelineResult?.finalStatus === 'delivered'
+                        ? Colors.success
+                        : pipelineResult?.finalStatus === 'partially_failed'
+                        ? Colors.warning
+                        : Colors.danger,
+                  },
+                ]}
+              >
+                FINAL STATUS:{' '}
+                {pipelineResult?.finalStatus === 'delivered'
+                  ? 'DISPATCHED (SUCCESS)'
+                  : pipelineResult?.finalStatus === 'partially_failed'
+                  ? 'DISPATCHED (PARTIAL DELIVERY)'
+                  : 'DISPATCH FAILED'}
+              </Text>
             </View>
 
             {createdWarningId && (
@@ -571,13 +619,8 @@ export default function WarningComposerScreen() {
             )}
 
             <View style={styles.payloadItem}>
-              <Text style={styles.payloadLabel}>Hazard Event:</Text>
-              <Text style={styles.payloadValue}>{preparedPayload.hazardEventTitle}</Text>
-            </View>
-
-            <View style={styles.payloadItem}>
-              <Text style={styles.payloadLabel}>Hazard Type:</Text>
-              <Text style={styles.payloadValue}>{preparedPayload.hazardType.toUpperCase()}</Text>
+              <Text style={styles.payloadLabel}>Headline:</Text>
+              <Text style={styles.payloadValue}>{preparedPayload.headline}</Text>
             </View>
 
             <View style={styles.payloadItem}>
@@ -588,44 +631,48 @@ export default function WarningComposerScreen() {
             </View>
 
             <View style={styles.payloadItem}>
-              <Text style={styles.payloadLabel}>Target Mode:</Text>
-              <Text style={styles.payloadValue}>{preparedPayload.targetMode.toUpperCase()}</Text>
-            </View>
-
-            <View style={styles.payloadItem}>
-              <Text style={styles.payloadLabel}>Target Areas:</Text>
-              <Text style={styles.payloadValue}>{preparedPayload.targetAreas.join(', ')}</Text>
-            </View>
-
-            <View style={styles.payloadItem}>
-              <Text style={styles.payloadLabel}>Resolved Districts:</Text>
-              <Text style={styles.payloadValue}>{preparedPayload.resolvedDistricts.join(', ')}</Text>
-            </View>
-
-            <View style={styles.payloadItem}>
-              <Text style={styles.payloadLabel}>Recipient Count:</Text>
+              <Text style={styles.payloadLabel}>Resolved Recipients:</Text>
               <Text style={[styles.payloadValue, { color: Colors.success, fontWeight: '900' }]}>
-                {preparedPayload.recipientCount.toLocaleString()} Citizens
+                {(pipelineResult?.recipientCount || preparedPayload.recipientCount).toLocaleString()} Citizens
               </Text>
             </View>
 
-            <View style={styles.payloadItem}>
-              <Text style={styles.payloadLabel}>Headline:</Text>
-              <Text style={styles.payloadValue}>{preparedPayload.headline}</Text>
-            </View>
+            {/* Per-Channel Breakdown */}
+            {pipelineResult?.channelResults && (
+              <View style={styles.channelResultsBox}>
+                <Text style={styles.channelResultsTitle}>DELIVERY CHANNEL BREAKDOWN</Text>
+                {pipelineResult.channelResults.map((res) => (
+                  <View key={res.channel} style={styles.chResultCard}>
+                    <View style={styles.chResultHeader}>
+                      <Text style={styles.chResultName}>{res.channel.toUpperCase()}</Text>
+                      <View
+                        style={[
+                          styles.chStatusBadge,
+                          res.status === 'Success' || String(res.status).toLowerCase() === 'success'
+                            ? styles.chStatusSuccess
+                            : res.status === 'Partial'
+                            ? styles.chStatusPartial
+                            : styles.chStatusFailed,
+                        ]}
+                      >
+                        <Text style={styles.chStatusText}>{String(res.status).toUpperCase()}</Text>
+                      </View>
+                    </View>
 
-            <View style={styles.payloadItem}>
-              <Text style={styles.payloadLabel}>Instructions:</Text>
-              <Text style={styles.payloadValue}>{preparedPayload.instructions}</Text>
-            </View>
+                    <Text style={styles.chResultCounts}>
+                      Delivered: {res.deliveredCount.toLocaleString()} | Failed: {res.failedCount.toLocaleString()}
+                    </Text>
 
-            <View style={styles.payloadItem}>
-              <Text style={styles.payloadLabel}>Delivery Channels:</Text>
-              <Text style={styles.payloadValue}>{preparedPayload.channels.join(', ').toUpperCase()}</Text>
-            </View>
+                    {res.errorMessage && (
+                      <Text style={styles.chResultError}>⚠️ {res.errorMessage}</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
 
             <Button
-              title="Close Payload Preview"
+              title="Close & Return to Command"
               variant="secondary"
               onPress={() => {
                 setShowPayloadModal(false);
@@ -1009,5 +1056,62 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     flex: 1,
     textAlign: 'right',
+  },
+  channelResultsBox: {
+    marginTop: Spacing.md,
+    gap: Spacing.xs,
+  },
+  channelResultsTitle: {
+    fontSize: FontSize.micro,
+    fontWeight: '800',
+    color: Colors.text.tertiary,
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  chResultCard: {
+    backgroundColor: '#0F172A',
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  chResultHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  chResultName: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.text.primary,
+  },
+  chStatusBadge: {
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 4,
+  },
+  chStatusSuccess: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+  },
+  chStatusPartial: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+  },
+  chStatusFailed: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+  },
+  chStatusText: {
+    fontSize: FontSize.micro,
+    fontWeight: '800',
+    color: Colors.text.primary,
+  },
+  chResultCounts: {
+    fontSize: FontSize.xs,
+    color: Colors.text.secondary,
+  },
+  chResultError: {
+    fontSize: FontSize.xs,
+    color: Colors.danger,
+    marginTop: 4,
   },
 });

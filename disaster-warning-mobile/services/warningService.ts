@@ -16,7 +16,12 @@ import {
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { executeDelivery } from './deliveryService';
+import {
+  executeDelivery,
+  dispatchMultiChannelWarning,
+  type MultiChannelDeliverySummary,
+  type ChannelExecutionOptions,
+} from './deliveryService';
 import { attachWarningToTimeline } from './hazardEventService';
 import { resolveRecipients } from './recipientService';
 import type {
@@ -26,6 +31,7 @@ import type {
   VerifiedGroundReportStub,
   DeliveryChannel,
   ChannelDeliveryResult,
+  ChannelResult,
   DeliveryLog,
 } from '@/types/warning';
 
@@ -270,6 +276,159 @@ export async function createWarningDocument(
     status: 'dispatching',
     recipientCount: resolvedCount,
     headline: payload.headline.trim(),
+  };
+}
+
+export interface WarningDispatchPipelineResult {
+  warningId: string;
+  finalStatus: WarningStatus;
+  recipientCount: number;
+  channelResults: ChannelResult[];
+  summary: MultiChannelDeliverySummary;
+}
+
+/**
+ * End-to-End UC01 Warning Dispatch Pipeline:
+ * 1. Officer submits warning -> Validate required fields.
+ * 2. Resolve recipients again on service layer before dispatch.
+ * 3. Prevent dispatch if recipient count is zero.
+ * 4. Create warning document in Cloud Firestore with initial status "dispatching".
+ * 5. Run selected delivery channels (sendPush, sendSMS, sendAudible) with fault isolation.
+ * 6. Collect delivery results (deliveredCount, failedCount, per-channel status).
+ * 7. Save individual per-channel delivery logs in `deliveryLogs` collection in Firestore.
+ * 8. Calculate final warning status:
+ *    - All selected channels succeed -> 'delivered'
+ *    - At least one channel succeeds and one fails -> 'partially_failed'
+ *    - ALL selected channels fail -> 'failed'
+ * 9. Update warning document in Cloud Firestore with final status, channel results, and dispatchedAt.
+ * 10. Attach warning record to hazard event timeline.
+ * 11. Return full summary to UI.
+ */
+export async function executeWarningDispatchPipeline(
+  payload: CreateWarningPayload,
+  issuedByUid: string,
+  issuedByName: string,
+  channelOptions?: Partial<Record<DeliveryChannel, ChannelExecutionOptions>>,
+): Promise<WarningDispatchPipelineResult> {
+  // 1. Validate
+  if (!payload.severity) {
+    throw new Error('Emergency severity level is mandatory.');
+  }
+  if (!payload.targetMode) {
+    throw new Error('Target mode is mandatory.');
+  }
+  if (!payload.targetAreas || payload.targetAreas.length === 0) {
+    throw new Error('At least one target area must be selected.');
+  }
+  if (!payload.headline || !payload.headline.trim()) {
+    throw new Error('Warning headline is mandatory.');
+  }
+  if (!payload.instructions || !payload.instructions.trim()) {
+    throw new Error('Emergency instruction text is mandatory.');
+  }
+  const selectedChannels = payload.channels || payload.deliveryChannels || [];
+  if (selectedChannels.length === 0) {
+    throw new Error('At least one delivery channel (Push, SMS, or Audible) must be selected.');
+  }
+
+  // 2. Resolve recipients again on service layer before dispatch
+  const resolution = await resolveRecipients(payload.targetMode, payload.targetAreas);
+  const recipients = resolution.recipients;
+  const recipientCount = resolution.recipientCount;
+
+  // 3. Prevent dispatch if recipient count is zero
+  if (recipientCount <= 0) {
+    throw new Error('No registered recipients found for the selected target areas. Warning creation aborted.');
+  }
+
+  const eventId = payload.eventId || payload.hazardEventId || '';
+
+  // 4 & 5. Create warning document with status "dispatching"
+  const docRef = await addDoc(collection(db, COLLECTION), {
+    eventId,
+    hazardEventId: eventId,
+    hazardEventTitle: payload.hazardEventTitle || '',
+    hazardType: payload.hazardType,
+    severity: payload.severity,
+    targetMode: payload.targetMode,
+    targetAreas: payload.targetAreas,
+    resolvedDistricts: resolution.contributingDistricts || payload.resolvedDistricts || [],
+    recipientCount,
+    headline: payload.headline.trim(),
+    instructions: payload.instructions.trim(),
+    channels: selectedChannels,
+    deliveryChannels: selectedChannels,
+    status: 'dispatching' as WarningStatus,
+    issuedBy: issuedByUid,
+    issuedByUid,
+    issuedByName,
+    createdAt: serverTimestamp(),
+    dispatchedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  const warningId = docRef.id;
+
+  // 6 & 7. Run selected delivery channels (sendPush, sendSMS, sendAudible) with fault isolation & collect results
+  const summary = await dispatchMultiChannelWarning(
+    payload,
+    recipients,
+    selectedChannels,
+    channelOptions,
+  );
+
+  // 8. Save per-channel delivery logs to Cloud Firestore `deliveryLogs` collection
+  for (const chResult of summary.channelResults) {
+    try {
+      await addDoc(collection(db, DELIVERY_LOGS_COLLECTION), {
+        warningId,
+        channel: chResult.channel,
+        recipientCount: chResult.recipientCount,
+        deliveredCount: chResult.deliveredCount,
+        failedCount: chResult.failedCount,
+        status: chResult.status,
+        errorMessage: chResult.errorMessage || null,
+        timestamp: serverTimestamp(),
+      });
+    } catch (err) {
+      console.warn(`Notice saving delivery log for channel ${chResult.channel}:`, err);
+    }
+  }
+
+  // 9. Calculate final warning status:
+  // - All succeed -> 'delivered'
+  // - At least 1 succeeds & 1 fails -> 'partially_failed'
+  // - ALL fail -> 'failed'
+  let finalStatus: WarningStatus = 'delivered';
+  if (summary.overallStatus === 'Failed') {
+    finalStatus = 'failed';
+  } else if (summary.overallStatus === 'Partial') {
+    finalStatus = 'partially_failed';
+  } else {
+    finalStatus = 'delivered';
+  }
+
+  // 10. Update warning document in Cloud Firestore
+  await updateDoc(doc(db, COLLECTION, warningId), {
+    status: finalStatus,
+    channelResults: summary.channelResults,
+    dispatchedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  // 11. Attach warning to hazard event timeline
+  if (eventId) {
+    attachWarningToTimeline(eventId, warningId, payload.headline.trim()).catch((err) =>
+      console.warn('Notice attaching warning to timeline:', err),
+    );
+  }
+
+  return {
+    warningId,
+    finalStatus,
+    recipientCount,
+    channelResults: summary.channelResults,
+    summary,
   };
 }
 
