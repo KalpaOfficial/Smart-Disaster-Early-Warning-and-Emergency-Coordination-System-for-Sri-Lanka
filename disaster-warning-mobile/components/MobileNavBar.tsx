@@ -67,8 +67,14 @@ export function MobileNavBar() {
   };
 
   return (
-    <View style={styles.dockContainer}>
-      <View style={styles.dockSurface}>
+    <View
+      style={styles.dockContainer}
+      pointerEvents={Platform.OS === 'web' ? undefined : 'box-none'}
+    >
+      <View
+        style={styles.dockSurface}
+        pointerEvents={Platform.OS === 'web' ? undefined : 'auto'}
+      >
         {NAV_ITEMS.map((item) => {
           const active = isActive(item.route);
 
@@ -100,7 +106,6 @@ export function MobileNavBar() {
 
 const styles = StyleSheet.create({
   dockContainer: {
-    pointerEvents: 'box-none',
     position: 'absolute',
     bottom: 0,
     left: 0,
@@ -110,6 +115,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.xs,
     backgroundColor: 'transparent',
     zIndex: 99,
+    ...(Platform.OS === 'web' ? ({ pointerEvents: 'none' } as never) : {}),
   },
   dockSurface: {
     width: '92%',
@@ -123,6 +129,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xs,
     borderWidth: 1,
     borderColor: 'rgba(56, 189, 248, 0.18)',
+    ...(Platform.OS === 'web' ? ({ pointerEvents: 'auto' } as never) : {}),
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.5,

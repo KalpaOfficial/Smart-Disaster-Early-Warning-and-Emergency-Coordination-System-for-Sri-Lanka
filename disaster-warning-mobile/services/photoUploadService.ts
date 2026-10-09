@@ -32,6 +32,75 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 /**
+ * Resize and compress an image Blob or Data URL on Web using HTML5 Canvas.
+ * Ensures the output string is ~30KB-60KB, far below Firestore's 1,048,487 byte document field limit.
+ */
+function compressImageOnWeb(source: Blob | string, maxDimension = 800, quality = 0.6): Promise<string> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      if (typeof source === 'string') {
+        resolve(source.length > 800000 ? '' : source);
+      } else {
+        blobToDataUrl(source).then((res) => resolve(res.length > 800000 ? '' : res));
+      }
+      return;
+    }
+
+    try {
+      const img = new window.Image();
+      const objectUrl = typeof source === 'string' ? null : URL.createObjectURL(source);
+      const srcUrl = typeof source === 'string' ? source : objectUrl!;
+
+      img.onload = () => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        let { width, height } = img;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(width, 1);
+        canvas.height = Math.max(height, 1);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          if (typeof source === 'string') {
+            resolve(source.length > 800000 ? '' : source);
+          } else {
+            blobToDataUrl(source).then(resolve);
+          }
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressedDataUrl);
+      };
+
+      img.onerror = () => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        if (typeof source === 'string') {
+          resolve(source.length > 800000 ? '' : source);
+        } else {
+          blobToDataUrl(source).then(resolve);
+        }
+      };
+
+      img.src = srcUrl;
+    } catch {
+      if (typeof source === 'string') {
+        resolve(source.length > 800000 ? '' : source);
+      } else {
+        blobToDataUrl(source).then(resolve);
+      }
+    }
+  });
+}
+
+/**
  * Upload a local device image file to Firebase Storage.
  * Path pattern: ground-reports/{reportId or timestamp}/{filename}.jpg
  *
@@ -54,10 +123,11 @@ export async function uploadGroundReportPhoto(
     const photoPath = `ground-reports/${cleanId}/evidence_${timestamp}.jpg`;
     const storageRef = ref(storage, photoPath);
 
-    // Fast-path: if localUri is already a Data URL
+    // Fast-path: if localUri is already a Data URL, compress it to fit Firestore
     if (isWeb && localUri.startsWith('data:')) {
+      const compressed = await compressImageOnWeb(localUri);
       return {
-        photoUrl: localUri,
+        photoUrl: compressed || localUri,
         photoPath: `web-local/${cleanId}/evidence_${timestamp}.jpg`,
       };
     }
@@ -88,10 +158,9 @@ export async function uploadGroundReportPhoto(
 
     // On web browser environment, Firebase Cloud Storage enforces CORS preflight headers
     // which block localhost/browser origins unless bucket CORS is configured via gsutil.
-    // To prevent browser XMLHttpRequest CORS network errors and multiple slow retries,
-    // immediately serialize image blob to Base64 data URL for web clients.
+    // Resize and compress image to a compact Base64 data URL (<60KB) to safely fit Firestore limits.
     if (isWeb) {
-      const dataUrl = await blobToDataUrl(blob);
+      const dataUrl = await compressImageOnWeb(blob);
       return {
         photoUrl: dataUrl || localUri,
         photoPath: `web-local/${cleanId}/evidence_${timestamp}.jpg`,

@@ -126,12 +126,14 @@ export async function submitGroundReport(
   }
 
   const referenceNumber = generateReferenceNumber();
+  // Firestore limit: each property must not exceed 1,048,487 bytes
+  const safePhotoUrl = photoUrl && photoUrl.length > 900000 ? '' : photoUrl;
 
   const docRef = await addDoc(collection(db, COLLECTION), {
     referenceNumber,
     observationType: data.observationType,
     description: data.description.trim(),
-    photoUrl,
+    photoUrl: safePhotoUrl,
     photoPath,
     location: {
       latitude: data.location.latitude,

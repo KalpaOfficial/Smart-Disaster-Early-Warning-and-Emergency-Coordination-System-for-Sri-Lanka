@@ -3,7 +3,7 @@
  * Displays high-resolution evidence photo, interactive coordinates, metadata,
  * and officer review verification controls (Verify, Reject, Request Info).
  */
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,9 +11,11 @@ import {
   Modal,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   TextInput,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -60,6 +62,14 @@ export function ReportDetailModal({
   const [decisionText, setDecisionText] = useState('');
   const [infoReplyText, setInfoReplyText] = useState('');
   const [activeAction, setActiveAction] = useState<'verify' | 'reject' | 'info' | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  const onSelectAction = (action: 'verify' | 'reject' | 'info') => {
+    setActiveAction(action);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  };
 
   if (!report) return null;
 
@@ -171,7 +181,13 @@ export function ReportDetailModal({
             </View>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <ScrollView
+            ref={scrollViewRef}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            style={{ flex: 1 }}
+          >
             {/* Status and Observation Badges */}
             <View style={styles.badgeRow}>
               <ReportStatusBadge status={report.status} size="md" />
@@ -354,32 +370,47 @@ export function ReportDetailModal({
 
                 {activeAction === null ? (
                   <View style={styles.officerBtnRow}>
-                    <TouchableOpacity
-                      style={[styles.officerBtn, styles.btnVerify]}
-                      onPress={() => setActiveAction('verify')}
-                      activeOpacity={0.8}
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.officerBtn,
+                        styles.btnVerify,
+                        pressed && styles.btnPressed,
+                      ]}
+                      onPress={() => onSelectAction('verify')}
+                      accessibilityRole="button"
+                      accessibilityLabel="Verify Ground Report"
                     >
                       <Ionicons name="checkmark-circle" size={16} color="#FFF" />
                       <Text style={styles.officerBtnText}>Verify</Text>
-                    </TouchableOpacity>
+                    </Pressable>
 
-                    <TouchableOpacity
-                      style={[styles.officerBtn, styles.btnReject]}
-                      onPress={() => setActiveAction('reject')}
-                      activeOpacity={0.8}
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.officerBtn,
+                        styles.btnReject,
+                        pressed && styles.btnPressed,
+                      ]}
+                      onPress={() => onSelectAction('reject')}
+                      accessibilityRole="button"
+                      accessibilityLabel="Reject Ground Report"
                     >
                       <Ionicons name="close-circle" size={16} color="#FFF" />
                       <Text style={styles.officerBtnText}>Reject</Text>
-                    </TouchableOpacity>
+                    </Pressable>
 
-                    <TouchableOpacity
-                      style={[styles.officerBtn, styles.btnInfo]}
-                      onPress={() => setActiveAction('info')}
-                      activeOpacity={0.8}
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.officerBtn,
+                        styles.btnInfo,
+                        pressed && styles.btnPressed,
+                      ]}
+                      onPress={() => onSelectAction('info')}
+                      accessibilityRole="button"
+                      accessibilityLabel="Request Information"
                     >
                       <Ionicons name="help-circle" size={16} color="#FFF" />
                       <Text style={styles.officerBtnText}>Ask Info</Text>
-                    </TouchableOpacity>
+                    </Pressable>
                   </View>
                 ) : (
                   <View style={styles.actionFormCard}>
@@ -457,24 +488,29 @@ export function ReportDetailModal({
                     />
 
                     <View style={styles.actionSubmitRow}>
-                      <TouchableOpacity
-                        style={styles.cancelActionBtn}
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.cancelActionBtn,
+                          pressed && styles.btnPressed,
+                        ]}
                         onPress={() => {
                           setActiveAction(null);
                           setDecisionText('');
                         }}
                       >
                         <Text style={styles.cancelActionBtnText}>Cancel</Text>
-                      </TouchableOpacity>
+                      </Pressable>
 
-                      <TouchableOpacity
-                        style={[
+                      <Pressable
+                        style={({ pressed }) => [
                           styles.confirmActionBtn,
                           activeAction === 'verify'
                             ? styles.btnVerify
                             : activeAction === 'reject'
                             ? styles.btnReject
                             : styles.btnInfo,
+                          pressed && styles.btnPressed,
+                          actionLoading && styles.btnDisabled,
                         ]}
                         onPress={
                           activeAction === 'verify'
@@ -488,9 +524,15 @@ export function ReportDetailModal({
                         {actionLoading ? (
                           <ActivityIndicator size="small" color="#FFF" />
                         ) : (
-                          <Text style={styles.confirmActionBtnText}>Confirm</Text>
+                          <Text style={styles.confirmActionBtnText}>
+                            {activeAction === 'verify'
+                              ? 'Confirm Verification'
+                              : activeAction === 'reject'
+                              ? 'Confirm Rejection'
+                              : 'Send Request'}
+                          </Text>
                         )}
-                      </TouchableOpacity>
+                      </Pressable>
                     </View>
                   </View>
                 )}
@@ -508,16 +550,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.bg.overlay,
     justifyContent: 'flex-end',
+    zIndex: 10000,
   },
   sheetContainer: {
     backgroundColor: '#0F172A',
     borderTopLeftRadius: BorderRadius.xl,
     borderTopRightRadius: BorderRadius.xl,
-    maxHeight: '90%',
-    paddingBottom: Spacing.xxxl,
+    maxHeight: '92%',
+    paddingBottom: Spacing.xl,
     borderWidth: 1,
     borderBottomWidth: 0,
     borderColor: 'rgba(255, 255, 255, 0.12)',
+    overflow: 'hidden',
+    zIndex: 10001,
   },
   headerBar: {
     flexDirection: 'row',
@@ -779,6 +824,14 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.md,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer', userSelect: 'none' } as never) : {}),
+  },
+  btnPressed: {
+    opacity: 0.75,
+    transform: [{ scale: 0.98 }],
+  },
+  btnDisabled: {
+    opacity: 0.5,
   },
   btnVerify: {
     backgroundColor: '#059669',
@@ -858,6 +911,7 @@ const styles = StyleSheet.create({
   cancelActionBtn: {
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer', userSelect: 'none' } as never) : {}),
   },
   cancelActionBtnText: {
     color: Colors.text.secondary,
@@ -868,6 +922,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.sm,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer', userSelect: 'none' } as never) : {}),
   },
   confirmActionBtnText: {
     color: '#FFF',
