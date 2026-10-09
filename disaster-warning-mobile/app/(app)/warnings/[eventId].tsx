@@ -79,8 +79,8 @@ export default function HazardEventDetailsScreen() {
   const handleIssueWarning = () => {
     if (!event) return;
     router.push({
-      pathname: '/(app)/warnings',
-      params: { issueWarningForEventId: event.id },
+      pathname: '/(app)/warnings/compose',
+      params: { eventId: event.id },
     } as never);
   };
 

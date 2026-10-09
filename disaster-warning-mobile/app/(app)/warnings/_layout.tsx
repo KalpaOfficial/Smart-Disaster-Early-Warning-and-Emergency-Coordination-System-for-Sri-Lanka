@@ -15,6 +15,7 @@ export default function WarningsLayout() {
     >
       <Stack.Screen name="index" />
       <Stack.Screen name="[eventId]" />
+      <Stack.Screen name="compose" />
     </Stack>
   );
 }
