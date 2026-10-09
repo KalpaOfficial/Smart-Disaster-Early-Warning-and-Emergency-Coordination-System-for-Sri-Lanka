@@ -8,12 +8,13 @@ import {
   where,
   getDocs,
   doc,
+  getDoc,
   addDoc,
   updateDoc,
   deleteDoc,
   serverTimestamp,
   type DocumentData,
-  type QueryDocumentSnapshot,
+  type DocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import {
@@ -38,8 +39,8 @@ import type {
 const COLLECTION = 'warnings';
 const DELIVERY_LOGS_COLLECTION = 'deliveryLogs';
 
-function mapWarningDoc(docSnap: QueryDocumentSnapshot<DocumentData>): HazardWarning {
-  const d = docSnap.data();
+function mapWarningDoc(docSnap: DocumentSnapshot<DocumentData>): HazardWarning {
+  const d = docSnap.data() || {};
   const warningId = docSnap.id;
   const eventId = d.eventId || d.hazardEventId || '';
   const channels = d.channels || d.deliveryChannels || ['push'];
@@ -70,6 +71,24 @@ function mapWarningDoc(docSnap: QueryDocumentSnapshot<DocumentData>): HazardWarn
     dispatchedAt: d.dispatchedAt?.toDate?.()?.toISOString(),
     updatedAt: d.updatedAt?.toDate?.()?.toISOString(),
   };
+}
+
+/**
+ * Fetch a single warning document by ID from Cloud Firestore `warnings` collection.
+ */
+export async function getWarningById(warningId: string): Promise<HazardWarning | null> {
+  if (!warningId) return null;
+  try {
+    const docRef = doc(db, COLLECTION, warningId);
+    const docSnap = await getDoc(docRef);
+    if (!docSnap.exists()) {
+      return null;
+    }
+    return mapWarningDoc(docSnap);
+  } catch (error) {
+    console.warn(`Notice fetching warning with ID ${warningId}:`, error);
+    return null;
+  }
 }
 
 /**

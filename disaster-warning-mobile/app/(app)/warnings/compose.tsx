@@ -268,7 +268,12 @@ export default function WarningComposerScreen() {
       setPreparedPayload(payload);
       setCreatedWarningId(result.warningId);
       setPipelineResult(result);
-      setShowPayloadModal(true);
+
+      // Navigate to UC01 Delivery Summary screen
+      router.push({
+        pathname: '/(app)/warnings/summary',
+        params: { warningId: result.warningId, eventId: payload.eventId },
+      } as never);
     } catch (err: unknown) {
       const errorMsg = (err as Error).message || 'Failed to create warning document in Cloud Firestore.';
       setValidationErrors([errorMsg]);
