@@ -38,6 +38,7 @@ import { SRI_LANKAN_DISTRICTS } from '@/constants/districts';
 import { SRI_LANKA_RIVER_BASINS } from '@/constants/riverBasins';
 import { getHazardEvent } from '@/services/hazardEventService';
 import { resolveRecipients } from '@/services/recipientService';
+import { createWarningDocument } from '@/services/warningService';
 import type { HazardEvent, HazardType } from '@/types/resources';
 import type {
   WarningSeverity,
@@ -88,7 +89,9 @@ export default function WarningComposerScreen() {
   // Validation & Payload Modal State
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [preparedPayload, setPreparedPayload] = useState<CreateWarningPayload | null>(null);
+  const [createdWarningId, setCreatedWarningId] = useState<string | null>(null);
   const [showPayloadModal, setShowPayloadModal] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // Fetch Event from Cloud Firestore by ID
   const fetchEvent = useCallback(async () => {
@@ -195,8 +198,9 @@ export default function WarningComposerScreen() {
     }
   };
 
-  // Form Validation & Payload Preparation
-  const handleDispatch = () => {
+  // Form Validation & Firestore Warning Document Creation
+  const handleDispatch = async () => {
+    setValidationErrors([]);
     const errors: string[] = [];
 
     if (!severity) {
@@ -217,35 +221,48 @@ export default function WarningComposerScreen() {
     if (deliveryChannels.length === 0) {
       errors.push('At least one Delivery Channel (Push, SMS, or Audible) must be selected.');
     }
-    if (recipientCount <= 0) {
-      errors.push('Zero recipients resolved for the selected target areas. Select valid areas with registered citizens.');
-    }
-
-    setValidationErrors(errors);
 
     if (errors.length > 0) {
+      setValidationErrors(errors);
       return;
     }
 
-    // Build Verified Warning Payload
-    const payload: CreateWarningPayload = {
-      eventId: event?.id || eventId || '',
-      hazardEventId: event?.id || eventId || '',
-      hazardEventTitle: event?.title || 'Open Hazard Event',
-      hazardType,
-      severity: severity as WarningSeverity,
-      targetMode,
-      targetAreas,
-      resolvedDistricts,
-      recipientCount,
-      headline: headline.trim(),
-      instructions: instructions.trim(),
-      channels: deliveryChannels,
-      deliveryChannels,
-    };
+    setSubmitting(true);
 
-    setPreparedPayload(payload);
-    setShowPayloadModal(true);
+    try {
+      const payload: CreateWarningPayload = {
+        eventId: event?.id || eventId || '',
+        hazardEventId: event?.id || eventId || '',
+        hazardEventTitle: event?.title || 'Open Hazard Event',
+        hazardType,
+        severity: severity as WarningSeverity,
+        targetMode,
+        targetAreas,
+        resolvedDistricts,
+        recipientCount,
+        headline: headline.trim(),
+        instructions: instructions.trim(),
+        channels: deliveryChannels,
+        deliveryChannels,
+      };
+
+      // 1-6. Re-resolve recipients on backend/service layer, prevent dispatch if recipient count is zero,
+      // create warning document in Cloud Firestore with initial status "dispatching", and return document ID.
+      const result = await createWarningDocument(
+        payload,
+        user?.id || user?.email || 'dmc-officer',
+        user?.fullName || 'DMC Duty Officer',
+      );
+
+      setPreparedPayload(payload);
+      setCreatedWarningId(result.warningId);
+      setShowPayloadModal(true);
+    } catch (err: unknown) {
+      const errorMsg = (err as Error).message || 'Failed to create warning document in Cloud Firestore.';
+      setValidationErrors([errorMsg]);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // List of Available Areas based on Target Mode
@@ -510,6 +527,7 @@ export default function WarningComposerScreen() {
                 <Button
                   title="DISPATCH WARNING"
                   variant="primary"
+                  loading={submitting}
                   icon={<Ionicons name="send" size={18} color="#FFFFFF" />}
                   onPress={handleDispatch}
                   style={styles.dispatchBtn}
@@ -527,21 +545,30 @@ export default function WarningComposerScreen() {
         )}
       </ScrollView>
 
-      {/* Prepared Warning Payload Modal */}
+      {/* Created Warning Document Modal */}
       {preparedPayload && (
         <FormModal
           visible={showPayloadModal}
           onClose={() => setShowPayloadModal(false)}
-          title="Prepared Warning Payload"
+          title="Warning Created in Firestore"
         >
           <View style={styles.payloadBox}>
             <Text style={styles.helperText}>
-              Form validated successfully. Review prepared warning payload before dispatch.
+              Warning document created in Cloud Firestore with status &quot;dispatching&quot;.
             </Text>
             <View style={styles.payloadHeader}>
               <Ionicons name="checkmark-circle" size={20} color={Colors.success} />
-              <Text style={styles.payloadHeaderText}>Validation Passed • Payload Prepared</Text>
+              <Text style={styles.payloadHeaderText}>DOCUMENT CREATED • STATUS: DISPATCHING</Text>
             </View>
+
+            {createdWarningId && (
+              <View style={styles.payloadItem}>
+                <Text style={styles.payloadLabel}>Firestore Warning ID:</Text>
+                <Text style={[styles.payloadValue, { color: Colors.accent.primary, fontWeight: '900' }]}>
+                  {createdWarningId}
+                </Text>
+              </View>
+            )}
 
             <View style={styles.payloadItem}>
               <Text style={styles.payloadLabel}>Hazard Event:</Text>

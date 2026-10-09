@@ -18,6 +18,7 @@ import {
 import { db } from './firebase';
 import { executeDelivery } from './deliveryService';
 import { attachWarningToTimeline } from './hazardEventService';
+import { resolveRecipients } from './recipientService';
 import type {
   HazardWarning,
   CreateWarningPayload,
@@ -188,6 +189,88 @@ function getSampleGroundReports(hazardEventId: string = ''): VerifiedGroundRepor
       reportedAt: new Date(Date.now() - 15 * 60000).toISOString(),
     },
   ];
+}
+
+/**
+ * UC01 Warning Creation Service:
+ * 1. Validates all required warning fields.
+ * 2. Resolves recipients again on the backend service layer before dispatch.
+ * 3. Prevents document creation if resolved recipient count is zero.
+ * 4. Creates the warning document in Cloud Firestore with initial status "dispatching".
+ * 5. Populates: eventId, hazardType, severity, targetMode, targetAreas, recipientCount,
+ *    headline, instructions, channels, status ("dispatching"), issuedBy, createdAt, dispatchedAt.
+ * 6. Returns created warning ID.
+ */
+export async function createWarningDocument(
+  payload: CreateWarningPayload,
+  issuedByUid: string,
+  issuedByName?: string,
+): Promise<{ warningId: string; status: WarningStatus; recipientCount: number; headline: string }> {
+  // 1. Validate required information
+  if (!payload.severity) {
+    throw new Error('Emergency severity level is mandatory.');
+  }
+  if (!payload.targetMode) {
+    throw new Error('Target mode is mandatory.');
+  }
+  if (!payload.targetAreas || payload.targetAreas.length === 0) {
+    throw new Error('At least one target area must be selected.');
+  }
+  if (!payload.headline || !payload.headline.trim()) {
+    throw new Error('Warning headline is mandatory.');
+  }
+  if (!payload.instructions || !payload.instructions.trim()) {
+    throw new Error('Emergency instruction text is mandatory.');
+  }
+  const selectedChannels = payload.channels || payload.deliveryChannels || [];
+  if (selectedChannels.length === 0) {
+    throw new Error('At least one delivery channel (Push, SMS, or Audible) must be selected.');
+  }
+
+  // 2. Resolve recipients again on backend/service layer before dispatch
+  const resolution = await resolveRecipients(payload.targetMode, payload.targetAreas);
+  const resolvedCount = resolution.recipientCount;
+
+  // 3. Prevent dispatch if recipient count is zero
+  if (resolvedCount <= 0) {
+    throw new Error('No registered recipients found for the selected target areas. Warning creation aborted.');
+  }
+
+  const eventId = payload.eventId || payload.hazardEventId || '';
+
+  // 4 & 5. Create warning document in Firestore `warnings` with initial status "dispatching"
+  const warningDocData = {
+    eventId,
+    hazardEventId: eventId,
+    hazardEventTitle: payload.hazardEventTitle || '',
+    hazardType: payload.hazardType,
+    severity: payload.severity,
+    targetMode: payload.targetMode,
+    targetAreas: payload.targetAreas,
+    resolvedDistricts: resolution.contributingDistricts || payload.resolvedDistricts || [],
+    recipientCount: resolvedCount,
+    headline: payload.headline.trim(),
+    instructions: payload.instructions.trim(),
+    channels: selectedChannels,
+    deliveryChannels: selectedChannels,
+    status: 'dispatching' as WarningStatus,
+    issuedBy: issuedByUid,
+    issuedByUid,
+    issuedByName: issuedByName || 'DMC Duty Officer',
+    createdAt: serverTimestamp(),
+    dispatchedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  const docRef = await addDoc(collection(db, COLLECTION), warningDocData);
+
+  // 6. Return created warning ID
+  return {
+    warningId: docRef.id,
+    status: 'dispatching',
+    recipientCount: resolvedCount,
+    headline: payload.headline.trim(),
+  };
 }
 
 /**
