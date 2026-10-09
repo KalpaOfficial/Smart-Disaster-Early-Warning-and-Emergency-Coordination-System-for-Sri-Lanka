@@ -40,13 +40,21 @@ export function resolveDistrictsFromTargetAreas(
   if (!targetAreas || targetAreas.length === 0) return [];
 
   if (targetMode === 'district') {
-    return Array.from(new Set(targetAreas));
+    return Array.from(new Set(targetAreas.map((a) => a.trim()).filter(Boolean)));
   }
 
   // Target Mode: River Basin — Map each basin to its contributing districts & deduplicate
   const districtSet = new Set<string>();
+
+  // Normalize lookup map for case-insensitive matching
+  const normalizedMap = new Map<string, string[]>();
+  for (const [key, districts] of Object.entries(SRI_LANKA_RIVER_BASINS)) {
+    normalizedMap.set(key.toLowerCase().trim(), districts);
+  }
+
   for (const basin of targetAreas) {
-    const districts = SRI_LANKA_RIVER_BASINS[basin] || [];
+    const trimmed = basin.trim().toLowerCase();
+    const districts = normalizedMap.get(trimmed) || SRI_LANKA_RIVER_BASINS[basin] || [];
     districts.forEach((d) => districtSet.add(d));
   }
   return Array.from(districtSet);
