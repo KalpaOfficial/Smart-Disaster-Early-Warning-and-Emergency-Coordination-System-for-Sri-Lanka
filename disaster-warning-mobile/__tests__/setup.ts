@@ -80,6 +80,10 @@ jest.mock('firebase/firestore', () => ({
   where: jest.fn(() => ({})),
   serverTimestamp: jest.fn(() => '2026-10-09T08:00:00.000Z'),
   arrayUnion: jest.fn((...args: unknown[]) => args),
+  onSnapshot: jest.fn((_q: unknown, callback: (snap: { docs: unknown[] }) => void) => {
+    callback({ docs: [] });
+    return jest.fn();
+  }),
 }));
 
 jest.mock('firebase/storage', () => ({

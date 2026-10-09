@@ -29,7 +29,12 @@ module.exports = {
     'services/offlineQueueService.ts',
     'services/photoUploadService.ts',
     'services/offlineSyncManager.ts',
+    'services/shelterService.ts',
+    'services/rescueTeamService.ts',
+    'services/reliefSupplyService.ts',
+    'services/postEventReportService.ts',
     'constants/reportPermissions.ts',
     'constants/observationTypes.ts',
+    'constants/districts.ts',
   ],
 };
