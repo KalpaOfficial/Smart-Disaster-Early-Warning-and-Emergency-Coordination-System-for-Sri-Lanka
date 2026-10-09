@@ -4,10 +4,25 @@
 import React, { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { AuthProvider } from '@/hooks/AuthContext';
 import { useAuth } from '@/hooks/useAuth';
 import { Colors } from '@/constants/colors';
+
+// Filter out benign React Native Web internal deprecation warnings in development
+if (Platform.OS === 'web') {
+  const origWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    const msg = typeof args[0] === 'string' ? args[0] : '';
+    if (
+      msg.includes('"shadow*" style props are deprecated') ||
+      msg.includes('props.pointerEvents is deprecated')
+    ) {
+      return;
+    }
+    origWarn(...args);
+  };
+}
 
 /**
  * Auth guard — redirects based on authentication state.

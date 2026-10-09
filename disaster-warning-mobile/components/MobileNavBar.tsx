@@ -67,7 +67,7 @@ export function MobileNavBar() {
   };
 
   return (
-    <View style={styles.dockContainer} pointerEvents="box-none">
+    <View style={styles.dockContainer}>
       <View style={styles.dockSurface}>
         {NAV_ITEMS.map((item) => {
           const active = isActive(item.route);
@@ -100,6 +100,7 @@ export function MobileNavBar() {
 
 const styles = StyleSheet.create({
   dockContainer: {
+    pointerEvents: 'box-none',
     position: 'absolute',
     bottom: 0,
     left: 0,

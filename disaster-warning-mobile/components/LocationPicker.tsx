@@ -94,14 +94,15 @@ export function LocationPicker({
 
       onLocationChange(newLoc, false);
 
-      // Attempt reverse geocoding to suggest local place name
-      try {
-        const geocode = await Location.reverseGeocodeAsync({
-          latitude: newLoc.latitude,
-          longitude: newLoc.longitude,
-        });
+      // Attempt reverse geocoding to suggest local place name (Native platforms)
+      if (Platform.OS !== 'web') {
+        try {
+          const geocode = await Location.reverseGeocodeAsync({
+            latitude: newLoc.latitude,
+            longitude: newLoc.longitude,
+          });
 
-        if (geocode && geocode.length > 0) {
+          if (geocode && geocode.length > 0) {
           const place = geocode[0];
           const suggestedName = [place.name, place.street, place.subregion, place.city]
             .filter(Boolean)
@@ -125,6 +126,7 @@ export function LocationPicker({
       } catch {
         // Reverse geocoding error is non-fatal
       }
+    }
     } catch (err) {
       console.warn('GPS acquisition error:', err);
       setGpsError('Could not obtain GPS fix. Manual location selection enabled.');

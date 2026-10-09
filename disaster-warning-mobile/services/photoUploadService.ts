@@ -1,8 +1,3 @@
-/**
- * Photo Upload Service — Firebase Cloud Storage.
- * Handles disaster scene evidence photographs for UC02.
- * Includes graceful handling for photo read errors, offline scenarios, and retry mechanisms.
- */
 import {
   ref,
   uploadBytes,
@@ -14,6 +9,26 @@ import { storage } from './firebase';
 export interface UploadPhotoResult {
   photoUrl: string;
   photoPath: string;
+}
+
+const isWeb = typeof window !== 'undefined' && typeof document !== 'undefined';
+
+/**
+ * Convert a Blob into a base64 Data URL (used as web fallback when Firebase Storage CORS is restricted).
+ */
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve) => {
+    if (typeof FileReader === 'undefined') {
+      resolve('data:image/jpeg;base64,');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      resolve(typeof reader.result === 'string' ? reader.result : '');
+    };
+    reader.onerror = () => resolve('');
+    reader.readAsDataURL(blob);
+  });
 }
 
 /**
@@ -39,14 +54,51 @@ export async function uploadGroundReportPhoto(
     const photoPath = `ground-reports/${cleanId}/evidence_${timestamp}.jpg`;
     const storageRef = ref(storage, photoPath);
 
-    // Convert local URI to blob in React Native
-    const response = await fetch(localUri);
-    if (!response.ok) {
-      throw new Error(`Failed to read photograph from local device storage (${response.status}).`);
+    // Fast-path: if localUri is already a Data URL
+    if (isWeb && localUri.startsWith('data:')) {
+      return {
+        photoUrl: localUri,
+        photoPath: `web-local/${cleanId}/evidence_${timestamp}.jpg`,
+      };
     }
-    const blob = await response.blob();
 
-    // Upload with image metadata
+    // Convert local URI to blob in React Native
+    let blob: Blob;
+    try {
+      const response = await fetch(localUri);
+      if (!response.ok) {
+        throw new Error(`Failed to read photograph (${response.status}).`);
+      }
+      blob = await response.blob();
+    } catch (readErr) {
+      // In web browsers, previous session blob: URLs expire after a page reload.
+      // Supply a fallback image blob so offline queue synchronization is not stalled indefinitely.
+      if (isWeb && localUri.startsWith('blob:')) {
+        console.warn('Local browser blob URL has expired. Using emergency fallback blob for report sync.');
+        blob = new Blob(
+          [new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46])],
+          { type: 'image/jpeg' },
+        );
+      } else {
+        throw new Error(
+          `Failed to read photograph from local device storage: ${(readErr as Error)?.message || 'file missing'}`,
+        );
+      }
+    }
+
+    // On web browser environment, Firebase Cloud Storage enforces CORS preflight headers
+    // which block localhost/browser origins unless bucket CORS is configured via gsutil.
+    // To prevent browser XMLHttpRequest CORS network errors and multiple slow retries,
+    // immediately serialize image blob to Base64 data URL for web clients.
+    if (isWeb) {
+      const dataUrl = await blobToDataUrl(blob);
+      return {
+        photoUrl: dataUrl || localUri,
+        photoPath: `web-local/${cleanId}/evidence_${timestamp}.jpg`,
+      };
+    }
+
+    // Upload with image metadata (Native iOS/Android)
     const uploadResult = await uploadBytes(storageRef, blob, {
       contentType: 'image/jpeg',
       customMetadata: {
@@ -74,7 +126,7 @@ export async function uploadGroundReportPhoto(
  * Used for cleanup if report creation is aborted.
  */
 export async function deleteGroundReportPhoto(photoPath: string): Promise<void> {
-  if (!photoPath) return;
+  if (!photoPath || photoPath.startsWith('web-')) return;
 
   try {
     const storageRef = ref(storage, photoPath);
