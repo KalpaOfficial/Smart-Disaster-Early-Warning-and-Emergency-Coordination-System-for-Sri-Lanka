@@ -42,6 +42,7 @@ import {
   executeWarningDispatchPipeline,
   type WarningDispatchPipelineResult,
 } from '@/services/warningService';
+import type { ChannelExecutionOptions } from '@/services/deliveryService';
 import type { HazardEvent, HazardType } from '@/types/resources';
 import type {
   WarningSeverity,
@@ -82,7 +83,8 @@ export default function WarningComposerScreen() {
   const [targetAreas, setTargetAreas] = useState<string[]>([]);
   const [headline, setHeadline] = useState('');
   const [instructions, setInstructions] = useState('');
-  const [deliveryChannels, setDeliveryChannels] = useState<DeliveryChannel[]>(['push', 'sms']);
+  const [deliveryChannels, setDeliveryChannels] = useState<DeliveryChannel[]>(['push', 'sms', 'audible']);
+  const [simulationMode, setSimulationMode] = useState<'standard' | 'scenario_a' | 'scenario_b'>('standard');
 
   // Recipient Resolution State
   const [resolvedDistricts, setResolvedDistricts] = useState<string[]>([]);
@@ -252,6 +254,33 @@ export default function WarningComposerScreen() {
         deliveryChannels,
       };
 
+      // Build channel execution options based on selected simulation mode
+      let channelOptions: Partial<Record<DeliveryChannel, ChannelExecutionOptions>> | undefined;
+
+      if (simulationMode === 'scenario_a') {
+        channelOptions = {
+          sms: {
+            mockFailure: true,
+            customErrorMessage: 'Cellular SMS Gateway Error: Carrier network timeout / quota exceeded.',
+          },
+        };
+      } else if (simulationMode === 'scenario_b') {
+        channelOptions = {
+          push: {
+            mockFailure: true,
+            customErrorMessage: 'Push Notification Service Gateway unreachable (Connection Timeout).',
+          },
+          sms: {
+            mockFailure: true,
+            customErrorMessage: 'Cellular SMS Gateway Error: Quota exceeded.',
+          },
+          audible: {
+            mockFailure: true,
+            customErrorMessage: 'Audible Siren Control Tower Offline: Grid power failure in target sectors.',
+          },
+        };
+      }
+
       // Execute End-to-End UC01 Warning Creation & Multi-Channel Dispatch Pipeline:
       // 1. Validate mandatory information
       // 2. Resolve recipients again on service layer
@@ -265,6 +294,7 @@ export default function WarningComposerScreen() {
         payload,
         user?.id || user?.email || 'dmc-officer',
         user?.fullName || 'DMC Duty Officer',
+        channelOptions,
       );
 
       setPreparedPayload(payload);
@@ -548,6 +578,85 @@ export default function WarningComposerScreen() {
                     </TouchableOpacity>
                   );
                 })}
+              </View>
+            </Card>
+
+            {/* Development / Simulation Mode Selector */}
+            <Card style={styles.formCard}>
+              <Text style={styles.sectionLabel}>9. DISPATCH SIMULATION MODE (DEVELOPMENT / TEST)</Text>
+              <Text style={styles.helperText}>
+                Select delivery simulation behavior to evaluate fault isolation and error handling.
+              </Text>
+
+              <View style={{ gap: Spacing.sm, marginTop: Spacing.xs }}>
+                <TouchableOpacity
+                  style={[
+                    styles.simOptionCard,
+                    simulationMode === 'standard' && styles.simOptionCardActive,
+                  ]}
+                  onPress={() => setSimulationMode('standard')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={simulationMode === 'standard' ? 'radio-button-on' : 'radio-button-off'}
+                    size={18}
+                    color={simulationMode === 'standard' ? Colors.success : Colors.text.tertiary}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.simOptionTitle, { color: Colors.success }]}>
+                      🟢 Standard Delivery (All Channels Succeed)
+                    </Text>
+                    <Text style={styles.simOptionDesc}>
+                      Normal multi-channel broadcast across Push, SMS, and Audible.
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.simOptionCard,
+                    simulationMode === 'scenario_a' && styles.simOptionCardActive,
+                  ]}
+                  onPress={() => setSimulationMode('scenario_a')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={simulationMode === 'scenario_a' ? 'radio-button-on' : 'radio-button-off'}
+                    size={18}
+                    color={simulationMode === 'scenario_a' ? Colors.warning : Colors.text.tertiary}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.simOptionTitle, { color: Colors.warning }]}>
+                      🟠 Scenario A: Partial Delivery (Push & Audible Succeed, SMS Fails)
+                    </Text>
+                    <Text style={styles.simOptionDesc}>
+                      Simulates SMS gateway failure while Push & Audible proceed without interruption.
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.simOptionCard,
+                    simulationMode === 'scenario_b' && styles.simOptionCardActive,
+                  ]}
+                  onPress={() => setSimulationMode('scenario_b')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={simulationMode === 'scenario_b' ? 'radio-button-on' : 'radio-button-off'}
+                    size={18}
+                    color={simulationMode === 'scenario_b' ? Colors.danger : Colors.text.tertiary}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.simOptionTitle, { color: Colors.danger }]}>
+                      🔴 Scenario B: Complete Failure (Push, SMS & Audible Fail)
+                    </Text>
+                    <Text style={styles.simOptionDesc}>
+                      Simulates complete failure across all channels; warning marked as &apos;Dispatch Failed&apos;.
+                    </Text>
+                  </View>
+                </TouchableOpacity>
               </View>
             </Card>
 
@@ -1148,5 +1257,28 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.warning,
     flex: 1,
+  },
+  simOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    backgroundColor: '#0F172A',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  simOptionCardActive: {
+    borderColor: Colors.accent.primary,
+    backgroundColor: 'rgba(99, 102, 241, 0.08)',
+  },
+  simOptionTitle: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+  },
+  simOptionDesc: {
+    fontSize: FontSize.micro,
+    color: Colors.text.tertiary,
+    marginTop: 2,
   },
 });
