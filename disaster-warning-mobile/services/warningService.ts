@@ -467,7 +467,13 @@ export async function executeWarningDispatchPipeline(
 
   // 11. Attach warning to hazard event timeline
   if (eventId) {
-    attachWarningToTimeline(eventId, warningId, payload.headline.trim()).catch((err) =>
+    attachWarningToTimeline(
+      eventId,
+      warningId,
+      payload.headline.trim(),
+      payload.severity,
+      issuedByName || issuedByUid,
+    ).catch((err) =>
       console.warn('Notice attaching warning to timeline:', err),
     );
   }
@@ -580,6 +586,8 @@ export async function createWarningWithDispatch(
       eventId,
       warningId,
       payload.headline.trim(),
+      payload.severity,
+      issuedByName || issuedByUid,
     );
   }
 
