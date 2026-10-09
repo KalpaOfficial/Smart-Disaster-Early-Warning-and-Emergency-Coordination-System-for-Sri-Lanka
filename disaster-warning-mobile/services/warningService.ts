@@ -302,7 +302,7 @@ export async function createWarningDocument(
 
   // 3. Prevent dispatch if recipient count is zero
   if (resolvedCount <= 0) {
-    throw new Error('No registered recipients found for the selected target areas. Warning creation aborted.');
+    throw new Error('No registered recipients found for the selected target area.');
   }
 
   const eventId = payload.eventId || payload.hazardEventId || '';
@@ -402,7 +402,7 @@ export async function executeWarningDispatchPipeline(
 
   // 3. Prevent dispatch if recipient count is zero
   if (recipientCount <= 0) {
-    throw new Error('No registered recipients found for the selected target areas. Warning creation aborted.');
+    throw new Error('No registered recipients found for the selected target area.');
   }
 
   const eventId = payload.eventId || payload.hazardEventId || '';
@@ -516,7 +516,7 @@ export async function createWarningWithDispatch(
     throw new Error('At least one delivery channel (Push, SMS, or Audible) must be selected.');
   }
   if (payload.recipientCount <= 0) {
-    throw new Error('No registered recipients matched for the selected target areas.');
+    throw new Error('No registered recipients found for the selected target area.');
   }
 
   const eventId = payload.eventId || payload.hazardEventId || '';

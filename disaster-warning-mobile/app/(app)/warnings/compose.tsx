@@ -215,6 +215,8 @@ export default function WarningComposerScreen() {
     }
     if (targetAreas.length === 0) {
       errors.push('At least one target area must be selected.');
+    } else if (recipientCount <= 0 && !resolvingRecipients) {
+      errors.push('No registered recipients found for the selected target area.');
     }
     if (!headline.trim()) {
       errors.push('Warning Headline is required.');
@@ -452,9 +454,20 @@ export default function WarningComposerScreen() {
                 ) : (
                   <>
                     <View style={styles.countRow}>
-                      <Text style={styles.countNumber}>{recipientCount.toLocaleString()}</Text>
+                      <Text style={[styles.countNumber, recipientCount === 0 && { color: Colors.warning }]}>
+                        {recipientCount.toLocaleString()}
+                      </Text>
                       <Text style={styles.countUnit}>Registered Recipients Resolved</Text>
                     </View>
+
+                    {targetAreas.length > 0 && recipientCount === 0 && (
+                      <View style={styles.zeroRecipientsNotice}>
+                        <Ionicons name="warning" size={16} color={Colors.warning} />
+                        <Text style={styles.zeroRecipientsNoticeText}>
+                          No registered recipients found for the selected target area.
+                        </Text>
+                      </View>
+                    )}
 
                     <Text style={styles.resolvedDistrictsLabel}>
                       Resolved Administrative Districts ({resolvedDistricts.length}):
@@ -1118,5 +1131,22 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.danger,
     marginTop: 4,
+  },
+  zeroRecipientsNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.35)',
+    marginVertical: Spacing.xs,
+  },
+  zeroRecipientsNoticeText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.warning,
+    flex: 1,
   },
 });
