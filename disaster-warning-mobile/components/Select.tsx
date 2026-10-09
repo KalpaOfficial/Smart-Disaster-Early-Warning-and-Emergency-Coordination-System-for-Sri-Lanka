@@ -47,10 +47,10 @@ export function Select({
 
   return (
     <View style={[styles.container, containerStyle]}>
-      {label && <Text style={styles.label}>{label}</Text>}
+      {Boolean(label) && <Text style={styles.label}>{label}</Text>}
 
       <TouchableOpacity
-        style={[styles.trigger, error && styles.triggerError]}
+        style={[styles.trigger, Boolean(error) && styles.triggerError]}
         onPress={() => setIsOpen(true)}
         activeOpacity={0.7}
       >
@@ -65,7 +65,7 @@ export function Select({
         <Ionicons name="chevron-down" size={16} color={Colors.text.tertiary} />
       </TouchableOpacity>
 
-      {error && <Text style={styles.errorText}>{error}</Text>}
+      {Boolean(error) && <Text style={styles.errorText}>{error}</Text>}
 
       <Modal
         visible={isOpen}

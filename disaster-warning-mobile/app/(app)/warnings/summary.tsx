@@ -206,13 +206,26 @@ export default function WarningDeliverySummaryScreen() {
   return (
     <ScreenContainer>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        {/* Duty Desk Command Header Banner */}
+        <View style={styles.dutyDeskHeader}>
+          <View style={styles.dutyDeskTitleRow}>
+            <Text style={styles.dutyDeskLogoText}>DMC CORE</Text>
+            <View style={styles.dutyDeskDivider} />
+            <Text style={styles.dutyDeskSubText}>DISASTER MANAGEMENT CENTRE | DUTY DESK</Text>
+          </View>
+          <View style={styles.dutyDeskStatusPill}>
+            <View style={styles.statusDotGreen} />
+            <Text style={styles.dutyDeskStatusText}>STATUS: NOMINAL</Text>
+          </View>
+        </View>
+
         {/* Navigation Header */}
         <View style={styles.navHeader}>
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
             <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
           </TouchableOpacity>
           <View style={styles.navTitleBox}>
-            <Text style={styles.navPill}>DISPATCH OUTCOME</Text>
+            <Text style={styles.navPill}>PANEL 04: BROADCAST VERIFICATION & DELIVERY SUMMARY</Text>
             <Text style={styles.navTitle}>Delivery Summary</Text>
           </View>
         </View>
@@ -413,6 +426,59 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.sm,
     paddingBottom: 110,
+  },
+  dutyDeskHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#0B132B',
+    paddingVertical: Spacing.xs + 2,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    marginBottom: Spacing.md,
+  },
+  dutyDeskTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  dutyDeskLogoText: {
+    fontSize: FontSize.micro,
+    fontWeight: '900',
+    color: '#38BDF8',
+    letterSpacing: 1,
+  },
+  dutyDeskDivider: {
+    width: 1,
+    height: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  dutyDeskSubText: {
+    fontSize: FontSize.micro,
+    fontWeight: '700',
+    color: Colors.text.tertiary,
+  },
+  dutyDeskStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: BorderRadius.full,
+  },
+  statusDotGreen: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.success,
+  },
+  dutyDeskStatusText: {
+    fontSize: FontSize.micro,
+    fontWeight: '800',
+    color: Colors.success,
   },
   navHeader: {
     flexDirection: 'row',
