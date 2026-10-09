@@ -344,6 +344,11 @@ export default function ReportListScreen() {
           setSelectedReport(null);
           router.push(`/(app)/reports/${id}` as never);
         }}
+        onOpenLinkedEvent={(eventId) => {
+          setModalVisible(false);
+          setSelectedReport(null);
+          router.push(`/(app)/warnings/${eventId}` as never);
+        }}
         isOfficer={isOfficer}
         activeEvents={activeEvents}
         onVerify={handleVerify}

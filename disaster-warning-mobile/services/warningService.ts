@@ -149,13 +149,15 @@ export async function getGroundReportsForEvent(
       const data = d.data();
       return {
         id: d.id,
+        referenceNumber: data.referenceNumber || '',
         hazardEventId: data.hazardEventId || hazardEventId,
         district: data.district || 'Ratnapura',
         locationName: data.locationName || 'River Basin',
         description: data.description || 'Ground level water rapidly rising above threshold.',
-        severity: data.severity || 'high',
-        verifiedBy: data.verifiedBy || 'DMC Field Inspector',
-        reportedAt: data.reportedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+        observationType: data.observationType,
+        severity: data.observationType === 'landslide_crack' || data.observationType === 'rising_water' ? 'high' : 'medium',
+        verifiedBy: data.verifiedByName || data.verifiedBy || 'DMC Duty Officer',
+        reportedAt: data.captureTime || data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
       };
     });
   } catch {

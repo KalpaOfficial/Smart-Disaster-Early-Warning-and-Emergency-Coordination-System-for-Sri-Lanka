@@ -28,6 +28,7 @@ interface ReportDetailModalProps {
   report: GroundReport | null;
   onClose: () => void;
   onOpenFullScreen?: (reportId: string) => void;
+  onOpenLinkedEvent?: (hazardEventId: string) => void;
   isOfficer?: boolean;
   activeEvents?: HazardEvent[];
   onVerify?: (
@@ -46,6 +47,7 @@ export function ReportDetailModal({
   report,
   onClose,
   onOpenFullScreen,
+  onOpenLinkedEvent,
   isOfficer = false,
   activeEvents = [],
   onVerify,
@@ -249,12 +251,24 @@ export function ReportDetailModal({
                   {report.verificationDecision || 'This observation was officially verified by the DMC Duty Officer.'}
                 </Text>
                 {report.hazardEventTitle && (
-                  <View style={styles.linkedEventBadge}>
+                  <TouchableOpacity
+                    style={styles.linkedEventBadge}
+                    activeOpacity={report.hazardEventId && onOpenLinkedEvent ? 0.75 : 1}
+                    onPress={() => {
+                      if (report.hazardEventId && onOpenLinkedEvent) {
+                        onClose();
+                        onOpenLinkedEvent(report.hazardEventId);
+                      }
+                    }}
+                  >
                     <Ionicons name="link-outline" size={13} color={Colors.accent.primary} />
                     <Text style={styles.linkedEventText}>
                       Linked Hazard: <Text style={styles.linkedEventHighlight}>{report.hazardEventTitle}</Text>
                     </Text>
-                  </View>
+                    {report.hazardEventId && onOpenLinkedEvent && (
+                      <Ionicons name="arrow-forward" size={12} color={Colors.accent.primary} style={{ marginLeft: 2 }} />
+                    )}
+                  </TouchableOpacity>
                 )}
                 <View style={styles.decisionFooterRow}>
                   <Text style={styles.decisionOfficer}>
@@ -377,31 +391,53 @@ export function ReportDetailModal({
                         : 'Request Information from Submitter'}
                     </Text>
 
-                    {activeAction === 'verify' && activeEvents.length > 0 && (
+                    {activeAction === 'verify' && (
                       <View style={{ marginBottom: Spacing.sm }}>
-                        <Text style={styles.miniLabel}>Link to Open Hazard Event:</Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 4 }}>
-                          {activeEvents.map((ev) => (
+                        <Text style={styles.miniLabel}>Link to Open Hazard Event (Optional):</Text>
+                        {activeEvents.length > 0 ? (
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 4 }}>
                             <TouchableOpacity
-                              key={ev.id}
                               style={[
                                 styles.eventChip,
-                                selectedEventId === ev.id && styles.eventChipActive,
+                                selectedEventId === '' && styles.eventChipActive,
                               ]}
-                              onPress={() => setSelectedEventId(ev.id)}
+                              onPress={() => setSelectedEventId('')}
                             >
                               <Text
                                 style={[
                                   styles.eventChipText,
-                                  selectedEventId === ev.id && styles.eventChipTextActive,
+                                  selectedEventId === '' && styles.eventChipTextActive,
                                 ]}
-                                numberOfLines={1}
                               >
-                                {ev.title}
+                                None (Standalone)
                               </Text>
                             </TouchableOpacity>
-                          ))}
-                        </ScrollView>
+                            {activeEvents.map((ev) => (
+                              <TouchableOpacity
+                                key={ev.id}
+                                style={[
+                                  styles.eventChip,
+                                  selectedEventId === ev.id && styles.eventChipActive,
+                                ]}
+                                onPress={() => setSelectedEventId(selectedEventId === ev.id ? '' : ev.id)}
+                              >
+                                <Text
+                                  style={[
+                                    styles.eventChipText,
+                                    selectedEventId === ev.id && styles.eventChipTextActive,
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {ev.title}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </ScrollView>
+                        ) : (
+                          <Text style={styles.noEventsMiniNotice}>
+                            No open hazard events. Observation will be verified as standalone.
+                          </Text>
+                        )}
                       </View>
                     )}
 
@@ -795,6 +831,12 @@ const styles = StyleSheet.create({
   eventChipTextActive: {
     color: '#080C14',
     fontWeight: '700',
+  },
+  noEventsMiniNotice: {
+    fontSize: FontSize.micro,
+    color: Colors.text.tertiary,
+    fontStyle: 'italic',
+    paddingVertical: 4,
   },
   decisionInput: {
     backgroundColor: '#0D1527',

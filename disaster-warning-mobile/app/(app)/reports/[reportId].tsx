@@ -477,10 +477,29 @@ export default function ReportDetailScreen() {
               {report.verificationDecision || 'This observation was verified by the DMC Duty Officer.'}
             </Text>
             {report.hazardEventTitle && (
-              <View style={styles.linkedEventBox}>
-                <Text style={styles.linkedEventLabel}>LINKED HAZARD EVENT</Text>
-                <Text style={styles.linkedEventTitle}>{report.hazardEventTitle}</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.linkedEventBox}
+                activeOpacity={report.hazardEventId ? 0.75 : 1}
+                onPress={() => {
+                  if (report.hazardEventId) {
+                    router.push(`/(app)/warnings/${report.hazardEventId}` as never);
+                  }
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  <View style={styles.linkedEventHeaderRow}>
+                    <Ionicons name="link-outline" size={13} color={Colors.accent.primary} />
+                    <Text style={styles.linkedEventLabel}>LINKED OPEN HAZARD EVENT</Text>
+                  </View>
+                  <Text style={styles.linkedEventTitle}>{report.hazardEventTitle}</Text>
+                </View>
+                {report.hazardEventId && (
+                  <View style={styles.viewEventAction}>
+                    <Text style={styles.viewEventActionText}>View Event</Text>
+                    <Ionicons name="arrow-forward" size={12} color={Colors.accent.primary} />
+                  </View>
+                )}
+              </TouchableOpacity>
             )}
             <View style={styles.decisionFooter}>
               <Text style={styles.decisionOfficerText}>
@@ -1046,21 +1065,49 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   linkedEventBox: {
-    backgroundColor: Colors.input.bg,
-    padding: Spacing.sm,
-    borderRadius: BorderRadius.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(56, 189, 248, 0.08)',
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.25)',
+    padding: Spacing.md,
     marginVertical: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  linkedEventHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 3,
   },
   linkedEventLabel: {
-    fontSize: FontSize.xs,
-    color: Colors.text.muted,
-    fontWeight: '700',
-    marginBottom: 2,
+    fontSize: FontSize.micro,
+    fontWeight: '800',
+    color: Colors.accent.primary,
+    letterSpacing: 0.6,
   },
   linkedEventTitle: {
     fontSize: FontSize.sm,
+    fontWeight: '700',
     color: Colors.text.primary,
-    fontWeight: '600',
+  },
+  viewEventAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(56, 189, 248, 0.16)',
+    paddingHorizontal: Spacing.sm + 2,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.xs,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+  },
+  viewEventActionText: {
+    fontSize: FontSize.micro,
+    fontWeight: '800',
+    color: Colors.accent.primary,
   },
   decisionFooter: {
     flexDirection: 'row',

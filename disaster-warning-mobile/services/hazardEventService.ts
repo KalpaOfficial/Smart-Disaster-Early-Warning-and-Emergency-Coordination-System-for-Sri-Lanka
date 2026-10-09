@@ -119,3 +119,42 @@ export async function attachWarningToTimeline(
     console.warn('Notice attaching warning to timeline:', error);
   }
 }
+
+/**
+ * Attach a verified ground observation report to the hazard event timeline (UC02 Phase 7.1).
+ */
+export async function attachReportToTimeline(
+  hazardEventId: string,
+  reportId: string,
+  reportData: {
+    referenceNumber?: string;
+    observationType?: string;
+    locationName?: string;
+    district?: string;
+    officerName?: string;
+    headline?: string;
+  },
+): Promise<void> {
+  if (!hazardEventId) return;
+  try {
+    const eventRef = doc(db, COLLECTION, hazardEventId);
+    await updateDoc(eventRef, {
+      timeline: arrayUnion({
+        id: `timeline-report-${reportId}`,
+        type: 'ground_report_verified',
+        reportId,
+        referenceNumber: reportData.referenceNumber || '',
+        observationType: reportData.observationType || 'hazard_observation',
+        locationName: reportData.locationName || '',
+        district: reportData.district || '',
+        officerName: reportData.officerName || 'DMC Officer',
+        headline: reportData.headline || `Ground Report Verified: ${reportData.referenceNumber || reportId}`,
+        timestamp: new Date().toISOString(),
+      }),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.warn('Notice attaching ground report to event timeline:', error);
+  }
+}
+

@@ -215,20 +215,30 @@ export default function HazardEventDetailsScreen() {
 
               {groundReports.length > 0 ? (
                 groundReports.map((report) => (
-                  <View key={report.id} style={styles.groundReportCard}>
+                  <TouchableOpacity
+                    key={report.id}
+                    style={styles.groundReportCard}
+                    activeOpacity={0.75}
+                    onPress={() => router.push(`/(app)/reports/${report.id}` as never)}
+                  >
                     <View style={styles.reportHeader}>
                       <View style={styles.verifiedTag}>
                         <Ionicons name="checkmark-circle" size={12} color={Colors.success} />
-                        <Text style={styles.verifiedTagText}>VERIFIED BY {report.verifiedBy}</Text>
+                        <Text style={styles.verifiedTagText}>
+                          {report.referenceNumber ? `#${report.referenceNumber} • ` : ''}VERIFIED BY {report.verifiedBy}
+                        </Text>
                       </View>
-                      <Text style={styles.reportTime}>
-                        {new Date(report.reportedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={styles.reportTime}>
+                          {new Date(report.reportedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                        <Ionicons name="chevron-forward" size={14} color={Colors.text.tertiary} />
+                      </View>
                     </View>
 
                     <Text style={styles.reportLocation}>📍 {report.locationName} ({report.district})</Text>
                     <Text style={styles.reportDescription}>{report.description}</Text>
-                  </View>
+                  </TouchableOpacity>
                 ))
               ) : (
                 <Text style={styles.noReportsText}>No ground reports verified yet for this hazard event.</Text>

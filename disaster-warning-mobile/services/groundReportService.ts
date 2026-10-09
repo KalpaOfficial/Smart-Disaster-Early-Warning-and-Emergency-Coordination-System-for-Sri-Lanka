@@ -18,6 +18,7 @@ import {
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { attachReportToTimeline } from './hazardEventService';
 import type {
   GroundReport,
   CreateGroundReportData,
@@ -248,25 +249,59 @@ export async function verifyReport(
     updatedAt: serverTimestamp(),
   });
 
-  // If linked to an open hazard event, append report note into the event timeline
+  // If linked to an open hazard event, append report note into the event timeline (UC02 Phase 7.1)
   if (payload.hazardEventId) {
     try {
-      const eventRef = doc(db, HAZARD_EVENTS_COLLECTION, payload.hazardEventId);
-      await updateDoc(eventRef, {
-        timeline: arrayUnion({
-          id: `timeline-report-${reportId}`,
-          type: 'ground_report_verified',
-          reportId,
-          headline: `Ground Report Verified: ${payload.hazardEventTitle || 'Observation'}`,
-          officerName: officer.name,
-          timestamp: new Date().toISOString(),
-        }),
-        updatedAt: serverTimestamp(),
+      const snap = await getDoc(reportRef);
+      const rData = snap.data();
+      await attachReportToTimeline(payload.hazardEventId, reportId, {
+        referenceNumber: rData?.referenceNumber,
+        observationType: rData?.observationType,
+        locationName: rData?.locationName,
+        district: rData?.district,
+        officerName: officer.name,
+        headline: `Ground Report Verified: ${rData?.referenceNumber || payload.hazardEventTitle || 'Hazard Observation'}`,
       });
     } catch (err) {
       console.warn('Notice linking ground report to event timeline:', err);
     }
   }
+}
+
+/**
+ * Retrieve all ground reports associated with a specific hazard event.
+ * Useful for reviewing all field observations supporting an active disaster event (UC02 Phase 7.1).
+ */
+export async function getReportsForHazardEvent(
+  hazardEventId: string,
+  status: ReportStatus | 'all' = 'verified',
+): Promise<GroundReport[]> {
+  let q = query(
+    collection(db, COLLECTION),
+    where('hazardEventId', '==', hazardEventId),
+  );
+  if (status !== 'all') {
+    q = query(q, where('status', '==', status));
+  }
+  const snapshot = await getDocs(q);
+  const items = snapshot.docs.map(mapReportDoc);
+  return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+/**
+ * Link or unlink an existing ground report to/from a hazard event (UC02 Phase 7.1).
+ */
+export async function linkReportToHazardEvent(
+  reportId: string,
+  hazardEventId: string | null,
+  hazardEventTitle: string | null,
+): Promise<void> {
+  const reportRef = doc(db, COLLECTION, reportId);
+  await updateDoc(reportRef, {
+    hazardEventId: hazardEventId || null,
+    hazardEventTitle: hazardEventTitle || null,
+    updatedAt: serverTimestamp(),
+  });
 }
 
 /**

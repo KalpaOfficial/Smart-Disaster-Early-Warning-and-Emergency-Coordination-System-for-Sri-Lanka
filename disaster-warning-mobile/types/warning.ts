@@ -78,10 +78,12 @@ export interface DeliveryLog {
 
 export interface VerifiedGroundReportStub {
   id: string;
+  referenceNumber?: string;
   hazardEventId: string;
   district: string;
   locationName: string;
   description: string;
+  observationType?: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   verifiedBy: string;
   reportedAt: string;
