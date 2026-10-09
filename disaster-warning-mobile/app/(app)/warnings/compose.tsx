@@ -206,6 +206,7 @@ export default function WarningComposerScreen() {
 
   // Form Validation & Firestore Warning Document Creation
   const handleDispatch = async () => {
+    if (submitting) return; // Prevent accidental double clicks during active dispatch
     setValidationErrors([]);
     const errors: string[] = [];
 
@@ -660,13 +661,27 @@ export default function WarningComposerScreen() {
               </View>
             </Card>
 
+            {/* Dispatch Progress Banner */}
+            {submitting && (
+              <Card style={styles.dispatchingProgressCard}>
+                <View style={styles.dispatchingProgressHeader}>
+                  <ActivityIndicator size="small" color={Colors.accent.primary} />
+                  <Text style={styles.dispatchingProgressTitle}>DISPATCH PIPELINE IN PROGRESS</Text>
+                </View>
+                <Text style={styles.dispatchingProgressDesc}>
+                  Creating warning document in Cloud Firestore and executing multi-channel broadcast across Push, SMS, and Audible siren networks...
+                </Text>
+              </Card>
+            )}
+
             {/* Form Step 9: Dispatch Warning Button */}
             <View style={styles.dispatchSection}>
               {isDmcOfficer ? (
                 <Button
-                  title="DISPATCH WARNING"
+                  title={submitting ? 'DISPATCHING WARNING...' : 'DISPATCH WARNING'}
                   variant="primary"
                   loading={submitting}
+                  disabled={submitting || recipientCount <= 0 || targetAreas.length === 0 || resolvingRecipients}
                   icon={<Ionicons name="send" size={18} color="#FFFFFF" />}
                   onPress={handleDispatch}
                   style={styles.dispatchBtn}
@@ -1280,5 +1295,28 @@ const styles = StyleSheet.create({
     fontSize: FontSize.micro,
     color: Colors.text.tertiary,
     marginTop: 2,
+  },
+  dispatchingProgressCard: {
+    backgroundColor: 'rgba(99, 102, 241, 0.12)',
+    borderColor: 'rgba(99, 102, 241, 0.35)',
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+  },
+  dispatchingProgressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: 4,
+  },
+  dispatchingProgressTitle: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.accent.primary,
+    letterSpacing: 0.5,
+  },
+  dispatchingProgressDesc: {
+    fontSize: FontSize.xs,
+    color: Colors.text.secondary,
+    lineHeight: 18,
   },
 });

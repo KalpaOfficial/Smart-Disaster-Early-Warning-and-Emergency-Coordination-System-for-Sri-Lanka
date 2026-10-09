@@ -23,6 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ScreenContainer } from '@/components/ScreenContainer';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
+import { EmptyState } from '@/components/EmptyState';
 import { MobileNavBar } from '@/components/MobileNavBar';
 import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/colors';
 import { getWarningById, getDeliveryLogsForWarning } from '@/services/warningService';
@@ -223,20 +224,29 @@ export default function WarningDeliverySummaryScreen() {
             <Text style={styles.stateTitle}>Retrieving Delivery Logs...</Text>
             <Text style={styles.stateDesc}>Fetching dispatch summary from Cloud Firestore.</Text>
           </Card>
-        ) : error && !warning ? (
+        ) : error ? (
           /* Error State */
           <Card style={styles.errorCard}>
-            <Ionicons name="alert-circle" size={36} color={Colors.danger} />
-            <Text style={styles.errorTitle}>Summary Fetch Error</Text>
+            <Ionicons name="cloud-offline" size={36} color={Colors.danger} />
+            <Text style={styles.errorTitle}>Firestore Fetch Error</Text>
             <Text style={styles.errorDesc}>{error}</Text>
             <Button
-              title="Return to Events"
-              variant="secondary"
+              title="Retry Fetch"
+              variant="danger"
               size="sm"
-              onPress={() => router.push('/(app)/warnings' as never)}
+              onPress={fetchSummaryData}
               style={styles.actionBtn}
             />
           </Card>
+        ) : !warning ? (
+          /* Not Found State */
+          <EmptyState
+            iconName="alert-circle-outline"
+            title="Warning Document Not Found"
+            message={`No warning summary document was found in Cloud Firestore matching ID "${warningId}".`}
+            actionTitle="Return to Open Events"
+            onAction={() => router.push('/(app)/warnings' as never)}
+          />
         ) : warning ? (
           <>
             {/* Top Status Banner */}
