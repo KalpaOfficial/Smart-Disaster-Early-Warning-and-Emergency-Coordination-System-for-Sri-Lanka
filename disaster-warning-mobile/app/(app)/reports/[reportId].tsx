@@ -426,7 +426,15 @@ export default function ReportDetailScreen() {
           <Text style={styles.locationNameText}>{report.locationName}</Text>
 
           {/* Map Preview or Coordinates Card */}
-          {MapView && report.location ? (
+          {Platform.OS === 'web' && report.location ? (
+            <View style={styles.mapContainer}>
+              <iframe
+                title="Hazard Location Map"
+                src={`https://www.openstreetmap.org/export/embed.html?bbox=${(report.location.longitude - 0.015).toFixed(4)}%2C${(report.location.latitude - 0.015).toFixed(4)}%2C${(report.location.longitude + 0.015).toFixed(4)}%2C${(report.location.latitude + 0.015).toFixed(4)}&layer=mapnik&marker=${report.location.latitude.toFixed(5)}%2C${report.location.longitude.toFixed(5)}`}
+                style={{ width: '100%', height: 200, border: 0, borderRadius: 12 }}
+              />
+            </View>
+          ) : MapView && report.location ? (
             <View style={styles.mapContainer}>
               <MapView
                 style={styles.miniMap}

@@ -1,7 +1,7 @@
 /**
  * Location Picker Component for UC02: Submit and Verify Ground Report.
- * Automatically acquires device GPS fix and allows manual map adjustment.
- * Aligned with UC02 Main Flow Steps 6-7 and Exception Flow: GPS Fix Unavailable.
+ * Automatically acquires device GPS fix and provides an interactive map preview on both Web and Native.
+ * Aligned with UC02 Main Flow Steps 23-24 and Exception Flow: GPS Fix Unavailable.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   TextInput,
+  ScrollView,
   Platform,
 } from 'react-native';
 import * as Location from 'expo-location';
@@ -35,6 +36,45 @@ try {
   MapView = null;
   Marker = null;
 }
+
+const DISTRICT_CENTERS: Record<string, { lat: number; lng: number }> = {
+  Colombo: { lat: 6.9271, lng: 79.8612 },
+  Gampaha: { lat: 7.0840, lng: 80.0098 },
+  Kalutara: { lat: 6.5854, lng: 79.9607 },
+  Kandy: { lat: 7.2906, lng: 80.6337 },
+  Matale: { lat: 7.4675, lng: 80.6234 },
+  'Nuwara Eliya': { lat: 6.9497, lng: 80.7891 },
+  Galle: { lat: 6.0535, lng: 80.2210 },
+  Matara: { lat: 5.9549, lng: 80.5550 },
+  Hambantota: { lat: 6.1429, lng: 81.1212 },
+  Jaffna: { lat: 9.6615, lng: 80.0255 },
+  Kilinochchi: { lat: 9.3803, lng: 80.3770 },
+  Mannar: { lat: 8.9810, lng: 79.9044 },
+  Vavuniya: { lat: 8.7542, lng: 80.4982 },
+  Mullaitivu: { lat: 9.2671, lng: 80.8142 },
+  Batticaloa: { lat: 7.7310, lng: 81.6747 },
+  Ampara: { lat: 7.2975, lng: 81.6747 },
+  Trincomalee: { lat: 8.5874, lng: 81.2152 },
+  Kurunegala: { lat: 7.4863, lng: 80.3623 },
+  Puttalam: { lat: 8.0408, lng: 79.8394 },
+  Anuradhapura: { lat: 8.3114, lng: 80.4037 },
+  Polonnaruwa: { lat: 7.9403, lng: 81.0188 },
+  Badulla: { lat: 6.9934, lng: 81.0550 },
+  Monaragala: { lat: 6.8728, lng: 81.3507 },
+  Ratnapura: { lat: 6.6828, lng: 80.4037 },
+  Kegalle: { lat: 7.2513, lng: 80.3464 },
+};
+
+const POPULAR_DISASTER_PRESETS = [
+  'Colombo',
+  'Gampaha',
+  'Kalutara',
+  'Ratnapura',
+  'Kandy',
+  'Galle',
+  'Matara',
+  'Badulla',
+];
 
 interface LocationPickerProps {
   location: GeoLocation;
@@ -68,8 +108,9 @@ export function LocationPicker({
 }: LocationPickerProps) {
   const [fetchingGps, setFetchingGps] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  const [lastFixTime, setLastFixTime] = useState<string | null>(null);
 
-  // Request GPS fix on mount if location is default
+  // Acquire live device GPS fix
   const acquireGpsLocation = useCallback(async () => {
     try {
       setFetchingGps(true);
@@ -77,7 +118,7 @@ export function LocationPicker({
 
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        setGpsError('GPS permission was denied. Please select location manually.');
+        setGpsError('GPS permission was denied. Please select location manually on the map.');
         return;
       }
 
@@ -93,9 +134,35 @@ export function LocationPicker({
       };
 
       onLocationChange(newLoc, false);
+      setLastFixTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
 
-      // Attempt reverse geocoding to suggest local place name (Native platforms)
-      if (Platform.OS !== 'web') {
+      // Reverse geocoding on Web (using OpenStreetMap Nominatim API)
+      if (Platform.OS === 'web') {
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${newLoc.latitude}&lon=${newLoc.longitude}`,
+            { headers: { Accept: 'application/json' } },
+          );
+          if (res.ok) {
+            const data = await res.json();
+            const placeName = (data.display_name || '').split(',').slice(0, 3).join(', ');
+            if (placeName && !locationName) {
+              onLocationNameChange(placeName);
+            }
+            const address = data.address || {};
+            const city = `${address.city || ''} ${address.town || ''} ${address.county || ''} ${address.state_district || ''} ${address.state || ''}`.toLowerCase();
+            const matchedDistrict = SRI_LANKAN_DISTRICTS.find((d: string) =>
+              city.includes(d.toLowerCase()),
+            );
+            if (matchedDistrict && !district) {
+              onDistrictChange(matchedDistrict);
+            }
+          }
+        } catch {
+          // non-fatal
+        }
+      } else {
+        // Native Reverse Geocoding
         try {
           const geocode = await Location.reverseGeocodeAsync({
             latitude: newLoc.latitude,
@@ -103,40 +170,40 @@ export function LocationPicker({
           });
 
           if (geocode && geocode.length > 0) {
-          const place = geocode[0];
-          const suggestedName = [place.name, place.street, place.subregion, place.city]
-            .filter(Boolean)
-            .join(', ');
+            const place = geocode[0];
+            const suggestedName = [place.name, place.street, place.subregion, place.city]
+              .filter(Boolean)
+              .join(', ');
 
-          if (suggestedName && !locationName) {
-            onLocationNameChange(suggestedName);
-          }
+            if (suggestedName && !locationName) {
+              onLocationNameChange(suggestedName);
+            }
 
-          if (place.subregion || place.city) {
-            const matchedDistrict = SRI_LANKAN_DISTRICTS.find(
-              (d: string) =>
-                d.toLowerCase() === (place.subregion || '').toLowerCase() ||
-                d.toLowerCase() === (place.city || '').toLowerCase(),
-            );
-            if (matchedDistrict && !district) {
-              onDistrictChange(matchedDistrict);
+            if (place.subregion || place.city) {
+              const matchedDistrict = SRI_LANKAN_DISTRICTS.find(
+                (d: string) =>
+                  d.toLowerCase() === (place.subregion || '').toLowerCase() ||
+                  d.toLowerCase() === (place.city || '').toLowerCase(),
+              );
+              if (matchedDistrict && !district) {
+                onDistrictChange(matchedDistrict);
+              }
             }
           }
+        } catch {
+          // non-fatal
         }
-      } catch {
-        // Reverse geocoding error is non-fatal
       }
-    }
     } catch (err) {
       console.warn('GPS acquisition error:', err);
-      setGpsError('Could not obtain GPS fix. Manual location selection enabled.');
+      setGpsError('Could not obtain live GPS fix. Manual location adjustment is enabled.');
     } finally {
       setFetchingGps(false);
     }
   }, [district, locationName, onDistrictChange, onLocationChange, onLocationNameChange]);
 
   useEffect(() => {
-    // If location is default (0 or default Colombo), attempt initial GPS fetch
+    // If location is at default initial point, attempt automatic initial GPS fix
     if (!location.latitude || location.latitude === 6.9271) {
       acquireGpsLocation();
     }
@@ -146,7 +213,36 @@ export function LocationPicker({
     const lat = parseFloat(latStr);
     const lng = parseFloat(lngStr);
     if (!isNaN(lat) && !isNaN(lng)) {
-      onLocationChange({ latitude: lat, longitude: lng }, true);
+      onLocationChange({ ...location, latitude: lat, longitude: lng }, true);
+    }
+  };
+
+  const handleNudge = (deltaLat: number, deltaLng: number) => {
+    onLocationChange(
+      {
+        ...location,
+        latitude: parseFloat((location.latitude + deltaLat).toFixed(5)),
+        longitude: parseFloat((location.longitude + deltaLng).toFixed(5)),
+      },
+      true,
+    );
+  };
+
+  const handlePresetSelect = (presetDistrict: string) => {
+    const coords = DISTRICT_CENTERS[presetDistrict];
+    if (coords) {
+      onLocationChange(
+        {
+          latitude: coords.lat,
+          longitude: coords.lng,
+          accuracy: 50,
+        },
+        true,
+      );
+      onDistrictChange(presetDistrict);
+      if (!locationName || locationName.includes('Sri Lanka') || locationName.includes('Town')) {
+        onLocationNameChange(`${presetDistrict} Town, Sri Lanka`);
+      }
     }
   };
 
@@ -156,6 +252,10 @@ export function LocationPicker({
   }));
 
   const canRenderNativeMap = Platform.OS !== 'web' && MapView && Marker;
+
+  // Calculate bounding box for embedded web OpenStreetMap
+  const webBbox = `${(location.longitude - 0.015).toFixed(4)}%2C${(location.latitude - 0.015).toFixed(4)}%2C${(location.longitude + 0.015).toFixed(4)}%2C${(location.latitude + 0.015).toFixed(4)}`;
+  const webMapSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${webBbox}&layer=mapnik&marker=${location.latitude.toFixed(5)}%2C${location.longitude.toFixed(5)}`;
 
   return (
     <View style={styles.container}>
@@ -174,16 +274,61 @@ export function LocationPicker({
             <ActivityIndicator size="small" color={Colors.accent.primary} />
           ) : (
             <>
-              <Ionicons name="navigate-outline" size={14} color={Colors.accent.primary} />
-              <Text style={styles.gpsRetryBtnText}>Acquire GPS</Text>
+              <Ionicons name="navigate-circle" size={16} color={Colors.accent.primary} />
+              <Text style={styles.gpsRetryBtnText}>Acquire Current GPS</Text>
             </>
           )}
         </TouchableOpacity>
       </View>
 
-      {/* Map or Coordinates Display */}
+      {/* GPS Telemetry Status Banner */}
+      <View style={styles.telemetryCard}>
+        <View style={styles.telemetryStatusRow}>
+          <View
+            style={[
+              styles.pulseIndicator,
+              { backgroundColor: isManualLocation ? Colors.warning : Colors.success },
+            ]}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.telemetryStatusTitle}>
+              {fetchingGps
+                ? 'Acquiring GPS Telemetry Fix...'
+                : isManualLocation
+                ? 'Manual Map Pin Placed'
+                : 'Live GPS Satellite Fix Verified'}
+            </Text>
+            <Text style={styles.telemetryStatusSubtitle}>
+              {location.latitude.toFixed(5)}° N, {location.longitude.toFixed(5)}° E
+              {location.accuracy ? ` • Accuracy: ±${Math.round(location.accuracy)}m` : ''}
+              {lastFixTime ? ` • Updated at ${lastFixTime}` : ''}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Map Display & Pin Placement */}
       <View style={styles.mapCard}>
-        {canRenderNativeMap ? (
+        {Platform.OS === 'web' ? (
+          <View style={styles.webMapContainer}>
+            <iframe
+              title="Hazard Incident Map"
+              src={webMapSrc}
+              style={{
+                width: '100%',
+                height: 220,
+                border: 0,
+                backgroundColor: '#090F1C',
+              }}
+            />
+            <View style={styles.mapHelpPill}>
+              <Ionicons name="location" size={12} color={Colors.accent.primary} />
+              <Text style={styles.mapHelpText}>
+                Plotted at {location.latitude.toFixed(4)}° N, {location.longitude.toFixed(4)}° E
+              </Text>
+            </View>
+          </View>
+        ) : canRenderNativeMap ? (
           <View style={styles.mapContainer}>
             <MapView
               style={styles.map}
@@ -196,7 +341,7 @@ export function LocationPicker({
               onPress={(e: MapEventWithCoordinate) => {
                 const coord = e.nativeEvent?.coordinate;
                 if (coord) {
-                  onLocationChange(coord, true);
+                  onLocationChange({ ...location, ...coord }, true);
                 }
               }}
             >
@@ -209,78 +354,118 @@ export function LocationPicker({
                 onDragEnd={(e: MapEventWithCoordinate) => {
                   const coord = e.nativeEvent?.coordinate;
                   if (coord) {
-                    onLocationChange(coord, true);
+                    onLocationChange({ ...location, ...coord }, true);
                   }
                 }}
                 title={locationName || 'Hazard Location'}
-                description={isManualLocation ? 'Manually Selected' : 'GPS Fix'}
+                description={isManualLocation ? 'Manually Selected' : 'GPS Satellite Fix'}
               />
             </MapView>
             <View style={styles.mapHelpPill}>
               <Text style={styles.mapHelpText}>Tap or drag pin to adjust coordinates</Text>
             </View>
           </View>
-        ) : (
-          <View style={styles.webFallbackContainer}>
-            <View style={styles.coordDisplayRow}>
-              <View style={styles.coordItem}>
-                <Text style={styles.coordLabel}>Latitude</Text>
-                <TextInput
-                  style={styles.coordInput}
-                  value={String(location.latitude)}
-                  onChangeText={(val) =>
-                    handleManualCoordinateChange(val, String(location.longitude))
-                  }
-                  keyboardType="numeric"
-                  placeholder="e.g. 6.9271"
-                  placeholderTextColor={Colors.input.placeholder}
-                />
-              </View>
+        ) : null}
 
-              <View style={styles.coordItem}>
-                <Text style={styles.coordLabel}>Longitude</Text>
-                <TextInput
-                  style={styles.coordInput}
-                  value={String(location.longitude)}
-                  onChangeText={(val) =>
-                    handleManualCoordinateChange(String(location.latitude), val)
-                  }
-                  keyboardType="numeric"
-                  placeholder="e.g. 79.8612"
-                  placeholderTextColor={Colors.input.placeholder}
-                />
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* Status Indicator */}
-        <View style={styles.metaRow}>
-          <View
-            style={[
-              styles.locationStatusPill,
-              isManualLocation ? styles.pillManual : styles.pillGps,
-            ]}
-          >
-            <Ionicons
-              name={isManualLocation ? 'pin-outline' : 'locate-outline'}
-              size={12}
-              color={isManualLocation ? Colors.warning : Colors.success}
-            />
-            <Text
-              style={[
-                styles.locationStatusText,
-                { color: isManualLocation ? Colors.warning : Colors.success },
-              ]}
+        {/* Nudge / Fine-Tuning Controls */}
+        <View style={styles.nudgeSection}>
+          <Text style={styles.nudgeSectionLabel}>Adjust Pin Coordinates:</Text>
+          <View style={styles.nudgeBtnRow}>
+            <TouchableOpacity
+              style={styles.nudgeBtn}
+              onPress={() => handleNudge(0.005, 0)}
+              activeOpacity={0.7}
             >
-              {isManualLocation ? 'Manually Placed' : 'GPS Fix Acquired'}
-            </Text>
+              <Ionicons name="arrow-up" size={14} color="#FFF" />
+              <Text style={styles.nudgeBtnText}>North</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.nudgeBtn}
+              onPress={() => handleNudge(-0.005, 0)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-down" size={14} color="#FFF" />
+              <Text style={styles.nudgeBtnText}>South</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.nudgeBtn}
+              onPress={() => handleNudge(0, -0.005)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-back" size={14} color="#FFF" />
+              <Text style={styles.nudgeBtnText}>West</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.nudgeBtn}
+              onPress={() => handleNudge(0, 0.005)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-forward" size={14} color="#FFF" />
+              <Text style={styles.nudgeBtnText}>East</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Manual Latitude / Longitude Edit Inputs */}
+        <View style={styles.coordDisplayRow}>
+          <View style={styles.coordItem}>
+            <Text style={styles.coordLabel}>Latitude (°N)</Text>
+            <TextInput
+              style={styles.coordInput}
+              value={String(location.latitude)}
+              onChangeText={(val) =>
+                handleManualCoordinateChange(val, String(location.longitude))
+              }
+              keyboardType="numeric"
+              placeholder="e.g. 6.9271"
+              placeholderTextColor={Colors.input.placeholder}
+            />
           </View>
 
-          <Text style={styles.coordSnippet}>
-            {location.latitude.toFixed(4)}° N, {location.longitude.toFixed(4)}° E
-          </Text>
+          <View style={styles.coordItem}>
+            <Text style={styles.coordLabel}>Longitude (°E)</Text>
+            <TextInput
+              style={styles.coordInput}
+              value={String(location.longitude)}
+              onChangeText={(val) =>
+                handleManualCoordinateChange(String(location.latitude), val)
+              }
+              keyboardType="numeric"
+              placeholder="e.g. 79.8612"
+              placeholderTextColor={Colors.input.placeholder}
+            />
+          </View>
         </View>
+      </View>
+
+      {/* Quick District Presets */}
+      <View style={styles.presetGroup}>
+        <Text style={styles.presetLabel}>Quick Snap to Disaster Zones:</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetScroll}>
+          {POPULAR_DISASTER_PRESETS.map((p) => {
+            const isSelected = district === p;
+            return (
+              <TouchableOpacity
+                key={p}
+                style={[styles.presetChip, isSelected && styles.presetChipActive]}
+                onPress={() => handlePresetSelect(p)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="location-outline"
+                  size={12}
+                  color={isSelected ? '#080C14' : Colors.accent.primary}
+                />
+                <Text style={[styles.presetChipText, isSelected && styles.presetChipTextActive]}>
+                  {p}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
 
       {gpsError && (
@@ -292,7 +477,7 @@ export function LocationPicker({
 
       {/* Landmark / Location Name Input */}
       <View style={styles.inputGroup}>
-        <Text style={styles.inputLabel}>Landmark / Street / Bridge Name</Text>
+        <Text style={styles.inputLabel}>Landmark / Street / Location Name</Text>
         <TextInput
           style={styles.textInput}
           value={locationName}
@@ -308,7 +493,20 @@ export function LocationPicker({
         placeholder="Select District"
         options={districtOptions}
         value={district}
-        onValueChange={onDistrictChange}
+        onValueChange={(val) => {
+          onDistrictChange(val);
+          const coords = DISTRICT_CENTERS[val];
+          if (coords && (!location.latitude || location.latitude === 6.9271)) {
+            onLocationChange(
+              {
+                latitude: coords.lat,
+                longitude: coords.lng,
+                accuracy: 50,
+              },
+              true,
+            );
+          }
+        }}
       />
 
       {!!error && <Text style={styles.errorText}>{error}</Text>}
@@ -324,7 +522,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: Spacing.sm,
+    marginBottom: Spacing.xs,
   },
   label: {
     fontSize: FontSize.xs,
@@ -339,16 +537,46 @@ const styles = StyleSheet.create({
   gpsRetryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 5,
     backgroundColor: 'rgba(56, 189, 248, 0.12)',
-    paddingHorizontal: Spacing.sm + 2,
-    paddingVertical: 4,
+    paddingHorizontal: Spacing.sm + 4,
+    paddingVertical: 5,
     borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.25)',
   },
   gpsRetryBtnText: {
     fontSize: FontSize.xs,
     fontWeight: '700',
     color: Colors.accent.primary,
+  },
+  telemetryCard: {
+    backgroundColor: '#0A1224',
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.16)',
+    padding: Spacing.sm + 2,
+    marginBottom: Spacing.sm,
+  },
+  telemetryStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  pulseIndicator: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  telemetryStatusTitle: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.text.primary,
+  },
+  telemetryStatusSubtitle: {
+    fontSize: FontSize.micro,
+    color: Colors.text.tertiary,
+    marginTop: 2,
   },
   mapCard: {
     backgroundColor: '#0D1527',
@@ -356,10 +584,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
     overflow: 'hidden',
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
+  },
+  webMapContainer: {
+    height: 220,
+    width: '100%',
+    position: 'relative',
+    backgroundColor: '#000',
   },
   mapContainer: {
-    height: 180,
+    height: 200,
     width: '100%',
     position: 'relative',
   },
@@ -371,24 +605,62 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     alignSelf: 'center',
-    backgroundColor: 'rgba(8, 12, 20, 0.85)',
+    backgroundColor: 'rgba(8, 12, 20, 0.88)',
     paddingHorizontal: Spacing.md,
     paddingVertical: 4,
     borderRadius: BorderRadius.full,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   mapHelpText: {
     fontSize: FontSize.micro,
     color: Colors.text.primary,
     fontWeight: '600',
   },
-  webFallbackContainer: {
-    padding: Spacing.md,
+  nudgeSection: {
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.xs,
+    backgroundColor: '#090F1E',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  nudgeSectionLabel: {
+    fontSize: FontSize.micro,
+    color: Colors.text.tertiary,
+    fontWeight: '600',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
+  nudgeBtnRow: {
+    flexDirection: 'row',
+    gap: Spacing.xs,
+  },
+  nudgeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: '#1E293B',
+    paddingVertical: 6,
+    borderRadius: BorderRadius.xs,
+  },
+  nudgeBtnText: {
+    fontSize: FontSize.micro,
+    color: '#FFF',
+    fontWeight: '600',
   },
   coordDisplayRow: {
     flexDirection: 'row',
     gap: Spacing.md,
+    padding: Spacing.md,
+    backgroundColor: '#0B1222',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
   },
   coordItem: {
     flex: 1,
@@ -400,7 +672,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   coordInput: {
-    backgroundColor: '#090F1C',
+    backgroundColor: '#080E1C',
     borderRadius: BorderRadius.sm,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
@@ -409,42 +681,44 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     fontSize: FontSize.sm,
   },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.06)',
-    backgroundColor: '#0B1222',
+  presetGroup: {
+    marginBottom: Spacing.md,
   },
-  locationStatusPill: {
+  presetLabel: {
+    fontSize: FontSize.micro,
+    fontWeight: '700',
+    color: Colors.text.tertiary,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  presetScroll: {
+    flexDirection: 'row',
+  },
+  presetChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.full,
+    backgroundColor: '#0F172A',
+    paddingHorizontal: Spacing.sm + 2,
+    paddingVertical: 5,
+    borderRadius: BorderRadius.sm,
+    marginRight: Spacing.xs,
     borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  pillGps: {
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+  presetChipActive: {
+    backgroundColor: Colors.accent.primary,
+    borderColor: Colors.accent.primary,
   },
-  pillManual: {
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderColor: 'rgba(245, 158, 11, 0.3)',
-  },
-  locationStatusText: {
+  presetChipText: {
     fontSize: FontSize.micro,
-    fontWeight: '700',
-    textTransform: 'uppercase',
+    color: Colors.text.secondary,
+    fontWeight: '600',
   },
-  coordSnippet: {
-    fontSize: FontSize.xs,
-    color: Colors.text.tertiary,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  presetChipTextActive: {
+    color: '#080C14',
+    fontWeight: '800',
   },
   gpsErrorBanner: {
     flexDirection: 'row',

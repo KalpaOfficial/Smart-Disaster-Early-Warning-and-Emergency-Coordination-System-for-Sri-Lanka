@@ -233,6 +233,16 @@ export function ReportDetailModal({
                     {report.isManualLocation ? ' (Manually Placed)' : ' (GPS Acquired)'}
                   </Text>
                 </View>
+
+                {Platform.OS === 'web' && report.location && (
+                  <View style={{ marginTop: 8, height: 160, borderRadius: 8, overflow: 'hidden' }}>
+                    <iframe
+                      title="Incident Map"
+                      src={`https://www.openstreetmap.org/export/embed.html?bbox=${(report.location.longitude - 0.012).toFixed(4)}%2C${(report.location.latitude - 0.012).toFixed(4)}%2C${(report.location.longitude + 0.012).toFixed(4)}%2C${(report.location.latitude + 0.012).toFixed(4)}&layer=mapnik&marker=${report.location.latitude.toFixed(5)}%2C${report.location.longitude.toFixed(5)}`}
+                      style={{ width: '100%', height: 160, border: 0 }}
+                    />
+                  </View>
+                )}
               </View>
             </View>
 
