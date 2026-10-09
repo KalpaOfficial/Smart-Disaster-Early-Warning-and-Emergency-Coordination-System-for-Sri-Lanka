@@ -81,20 +81,26 @@ service cloud.firestore {
     // UC02: GROUND REPORTS (Citizen Submissions & Officer Verification)
     // ==========================================
     match /groundReports/{reportId} {
-      // Citizens can read their own reports; DMC Officers can read all reports
+      // Authenticated users can read reports if they are verified by DMC,
+      // or if the user is the original submitter, or if the user is a DMC Duty Officer.
       allow read: if isAuthenticated() && (
         resource == null ||
+        resource.data.status == 'verified' ||
+        resource.data.submitterId == request.auth.uid ||
         resource.data.userId == request.auth.uid ||
         isDmcOfficer()
       );
 
-      // Citizens can create reports linked to their own account
-      allow create: if isAuthenticated() &&
-        request.resource.data.userId == request.auth.uid;
+      // Citizens and volunteers can create reports linked to their own account (starts as pending_verification)
+      allow create: if isAuthenticated() && (
+        request.resource.data.submitterId == request.auth.uid ||
+        request.resource.data.userId == request.auth.uid
+      );
 
-      // DMC Officers can verify/update reports; report owner can update drafts
+      // DMC Officers can verify/reject/update reports; submitters can reply to info requests
       allow update: if isAuthenticated() && (
         isDmcOfficer() ||
+        resource.data.submitterId == request.auth.uid ||
         resource.data.userId == request.auth.uid
       );
 
