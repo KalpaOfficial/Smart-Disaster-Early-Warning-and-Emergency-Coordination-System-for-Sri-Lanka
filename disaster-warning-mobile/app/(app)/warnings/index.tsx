@@ -163,6 +163,11 @@ export default function IssueHazardWarningScreen() {
     }
   }, [selectedEventId]);
 
+  // Trigger initial fetch of open hazard events and telemetry on component mount
+  useEffect(() => {
+    fetchOpenEventsAndTelemetry();
+  }, [fetchOpenEventsAndTelemetry]);
+
   const params = useLocalSearchParams<{ issueWarningForEventId?: string }>();
 
   useEffect(() => {

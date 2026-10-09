@@ -39,9 +39,9 @@ export function ProgressBar({
 
   return (
     <View style={styles.container}>
-      {(label || showPercentage) && (
+      {(Boolean(label) || showPercentage) && (
         <View style={styles.header}>
-          {label && <Text style={styles.label}>{label}</Text>}
+          {Boolean(label) && <Text style={styles.label}>{label}</Text>}
           <Text style={styles.value}>
             {current.toLocaleString()}{unit ? ` ${unit}` : ''} / {total.toLocaleString()}{unit ? ` ${unit}` : ''}
             {showPercentage && (
