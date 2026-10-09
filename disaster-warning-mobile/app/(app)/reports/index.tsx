@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenContainer } from '@/components/ScreenContainer';
 import { ReportCard } from '@/components/ReportCard';
@@ -45,6 +45,7 @@ import type { GroundReport } from '@/types/groundReport';
 import type { HazardEvent } from '@/types/resources';
 
 type OfficerTab = 'pending' | 'info_requested' | 'all';
+type CitizenTab = 'verified' | 'my_reports';
 
 const OFFICER_TABS: { key: OfficerTab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'pending', label: 'Pending', icon: 'time-outline' },
@@ -52,9 +53,15 @@ const OFFICER_TABS: { key: OfficerTab; label: string; icon: keyof typeof Ionicon
   { key: 'all', label: 'All', icon: 'list-outline' },
 ];
 
+const CITIZEN_TABS: { key: CitizenTab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { key: 'verified', label: 'Verified Feed', icon: 'shield-checkmark-outline' },
+  { key: 'my_reports', label: 'My Submissions', icon: 'document-text-outline' },
+];
+
 export default function ReportListScreen() {
   const { state: authState } = useAuth();
   const router = useRouter();
+  const params = useLocalSearchParams<{ tab?: string }>();
   const user = authState.user;
 
   const permissions = getReportPermissions(user?.role);
@@ -74,7 +81,19 @@ export default function ReportListScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<OfficerTab>('pending');
+  const [citizenTab, setCitizenTab] = useState<CitizenTab>(
+    params.tab === 'my_reports' || params.tab === 'my' ? 'my_reports' : 'verified',
+  );
   const [offlineCount, setOfflineCount] = useState(0);
+
+  // Sync tab state if query parameter changes
+  useEffect(() => {
+    if (params.tab === 'my_reports' || params.tab === 'my') {
+      setCitizenTab('my_reports');
+    } else if (params.tab === 'verified') {
+      setCitizenTab('verified');
+    }
+  }, [params.tab]);
 
   // Detail modal state
   const [selectedReport, setSelectedReport] = useState<GroundReport | null>(null);
@@ -93,9 +112,7 @@ export default function ReportListScreen() {
         } else {
           data = await getAllReports();
         }
-      } else if (permissions.canSeeOwnReports) {
-        data = await getMyReports(user.id);
-      } else {
+      } else if (isDistrictOfficer) {
         // District Officer (UC02 Phase 7.3): Situational Awareness feed of verified reports
         data = await getAllReports({
           status: 'verified',
@@ -105,12 +122,17 @@ export default function ReportListScreen() {
           // If no reports in user's specific district, show all verified reports across Sri Lanka
           data = await getAllReports({ status: 'verified' });
         }
+      } else if (citizenTab === 'my_reports') {
+        data = await getMyReports(user.id);
+      } else {
+        // Public Verified Feed: ONLY reports officially verified by DMC officers
+        data = await getAllReports({ status: 'verified' });
       }
       setReports(data);
     } catch (err) {
       console.warn('Failed to fetch reports:', err);
     }
-  }, [user, isOfficer, permissions.canSeeOwnReports, activeTab]);
+  }, [user, isOfficer, isDistrictOfficer, activeTab, citizenTab]);
 
   const fetchOfflineCount = useCallback(async () => {
     try {
@@ -219,7 +241,7 @@ export default function ReportListScreen() {
       <ReportCard
         report={item}
         onPress={() => handleReportPress(item)}
-        showSubmitter={isOfficer}
+        showSubmitter={isOfficer || citizenTab === 'verified' || isDistrictOfficer}
         isNew={isNew}
       />
     );
@@ -229,12 +251,16 @@ export default function ReportListScreen() {
     ? 'Verification Queue'
     : isDistrictOfficer
     ? 'District Ground Observations'
+    : citizenTab === 'verified'
+    ? 'Verified Ground Observations'
     : 'My Ground Reports';
 
   const headerSubtitle = isOfficer
     ? `${reports.length} report${reports.length !== 1 ? 's' : ''} awaiting review`
     : isDistrictOfficer
     ? `${reports.length} verified observation${reports.length !== 1 ? 's' : ''} • Situational Feed`
+    : citizenTab === 'verified'
+    ? `${reports.length} verified report${reports.length !== 1 ? 's' : ''} • Official Public Feed`
     : `${reports.length} submitted report${reports.length !== 1 ? 's' : ''}`;
 
   return (
@@ -300,6 +326,29 @@ export default function ReportListScreen() {
         </View>
       )}
 
+      {/* Citizen & Volunteer Tabs: Verified Feed vs My Reports */}
+      {!isOfficer && !isDistrictOfficer && (
+        <View style={styles.tabBar}>
+          {CITIZEN_TABS.map((tab) => (
+            <TouchableOpacity
+              key={tab.key}
+              style={[styles.tabItem, citizenTab === tab.key && styles.tabItemActive]}
+              onPress={() => setCitizenTab(tab.key)}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={tab.icon}
+                size={14}
+                color={citizenTab === tab.key ? Colors.accent.primary : Colors.text.tertiary}
+              />
+              <Text style={[styles.tabLabel, citizenTab === tab.key && styles.tabLabelActive]}>
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
       {/* Content */}
       {loading ? (
         <View style={styles.centered}>
@@ -333,6 +382,8 @@ export default function ReportListScreen() {
                   ? 'Queue Clear'
                   : isDistrictOfficer
                   ? 'No Verified Observations'
+                  : citizenTab === 'verified'
+                  ? 'No Verified Reports'
                   : 'No Reports Yet'
               }
               message={
@@ -340,6 +391,8 @@ export default function ReportListScreen() {
                   ? 'No ground reports in this category awaiting verification.'
                   : isDistrictOfficer
                   ? `No verified hazard observations currently recorded for ${user?.district || 'this operational sector'}.`
+                  : citizenTab === 'verified'
+                  ? 'No ground hazard observations have been officially verified by DMC Duty Officers yet.'
                   : 'Submit your first ground hazard observation to help the Disaster Management Centre respond faster.'
               }
             />
