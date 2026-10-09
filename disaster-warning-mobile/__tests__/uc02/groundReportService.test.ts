@@ -5,8 +5,15 @@ import {
   requestAdditionalInfo,
   submitAdditionalInfo,
   linkReportToHazardEvent,
+  getReportById,
+  getPendingReports,
+  getMyReports,
+  getAllReports,
+  getReportsForHazardEvent,
+  getVerifiedReportsForHazardEvent,
+  getGroundReportStats,
 } from '@/services/groundReportService';
-import { addDoc, updateDoc } from 'firebase/firestore';
+import { addDoc, updateDoc, getDoc, getDocs } from 'firebase/firestore';
 import type { CreateGroundReportData } from '@/types/groundReport';
 
 describe('UC02: Ground Report Service CRUD & Officer Workflows', () => {
@@ -176,6 +183,223 @@ describe('UC02: Ground Report Service CRUD & Officer Workflows', () => {
       );
 
       expect(updateDoc).toHaveBeenCalledTimes(1);
+    });
+
+    it('can unlink hazard event by passing null references', async () => {
+      await linkReportToHazardEvent('rep-123', null, null);
+      expect(updateDoc).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        hazardEventId: null,
+        hazardEventTitle: null,
+      }));
+    });
+  });
+
+  describe('Report Retrieval & Queries (UC02 Steps 13-14 & Dashboards)', () => {
+    it('retrieves a single report by ID when it exists (Firestore Timestamp format)', async () => {
+      const mockDoc = {
+        exists: () => true,
+        id: 'rep-99',
+        data: () => ({
+          referenceNumber: 'GR-20261009-9999',
+          observationType: 'rising_water',
+          description: 'Water over canal wall',
+          photoUrl: 'https://storage/sample.jpg',
+          photoPath: 'ground-reports/rep-99.jpg',
+          location: { latitude: 6.9, longitude: 80.0, altitude: 12, accuracy: 5 },
+          locationName: 'Kelaniya Temple Road',
+          district: 'Gampaha',
+          status: 'verified',
+          submitterId: 'user-1',
+          submitterName: 'Amal',
+          submitterRole: 'citizen',
+          captureTime: { toDate: () => new Date('2026-10-09T07:00:00Z') },
+          createdAt: { toDate: () => new Date('2026-10-09T07:05:00Z') },
+          verificationTimestamp: { toDate: () => new Date('2026-10-09T07:30:00Z') },
+          hazardEventId: 'ev-1',
+          hazardEventTitle: 'Kelani Flooding',
+        }),
+      };
+      (getDoc as jest.Mock).mockResolvedValueOnce(mockDoc);
+
+      const report = await getReportById('rep-99');
+      expect(report).not.toBeNull();
+      expect(report?.id).toBe('rep-99');
+      expect(report?.referenceNumber).toBe('GR-20261009-9999');
+      expect(report?.observationType).toBe('rising_water');
+      expect(report?.captureTime).toBe('2026-10-09T07:00:00.000Z');
+      expect(report?.createdAt).toBe('2026-10-09T07:05:00.000Z');
+      expect(report?.verificationTimestamp).toBe('2026-10-09T07:30:00.000Z');
+    });
+
+    it('retrieves a single report by ID with string timestamps and fallback default fields', async () => {
+      const mockDoc = {
+        exists: () => true,
+        id: 'rep-fallback',
+        data: () => ({
+          captureTime: '2026-10-09T06:00:00.000Z',
+          createdAt: '2026-10-09T06:01:00.000Z',
+          verificationTimestamp: '2026-10-09T06:30:00.000Z',
+          // Omitting referenceNumber, observationType, location, etc. to test fallbacks
+        }),
+      };
+      (getDoc as jest.Mock).mockResolvedValueOnce(mockDoc);
+
+      const report = await getReportById('rep-fallback');
+      expect(report).not.toBeNull();
+      expect(report?.referenceNumber).toBe('GR-REP-FALL');
+      expect(report?.observationType).toBe('other');
+      expect(report?.location.latitude).toBe(6.9271);
+      expect(report?.location.longitude).toBe(79.8612);
+      expect(report?.locationName).toBe('Unknown Location');
+    });
+
+    it('returns null if report does not exist in Firestore', async () => {
+      (getDoc as jest.Mock).mockResolvedValueOnce({
+        exists: () => false,
+      });
+
+      const report = await getReportById('non-existent-id');
+      expect(report).toBeNull();
+    });
+
+    it('fetches pending verification reports sorted descending by creation date', async () => {
+      const doc1 = {
+        id: 'doc-older',
+        data: () => ({
+          status: 'pending_verification',
+          createdAt: '2026-10-09T05:00:00.000Z',
+        }),
+      };
+      const doc2 = {
+        id: 'doc-newer',
+        data: () => ({
+          status: 'pending_verification',
+          createdAt: '2026-10-09T06:00:00.000Z',
+        }),
+      };
+      (getDocs as jest.Mock).mockResolvedValueOnce({
+        docs: [doc1, doc2],
+      });
+
+      const pending = await getPendingReports();
+      expect(pending).toHaveLength(2);
+      expect(pending[0].id).toBe('doc-newer');
+      expect(pending[1].id).toBe('doc-older');
+    });
+
+    it('fetches citizen own reports via getMyReports', async () => {
+      const doc1 = {
+        id: 'doc-my-1',
+        data: () => ({
+          submitterId: 'cit-441',
+          createdAt: '2026-10-09T05:00:00.000Z',
+        }),
+      };
+      (getDocs as jest.Mock).mockResolvedValueOnce({
+        docs: [doc1],
+      });
+
+      const myReports = await getMyReports('cit-441');
+      expect(myReports).toHaveLength(1);
+      expect(myReports[0].id).toBe('doc-my-1');
+    });
+
+    it('fetches all reports with multi-criteria filters', async () => {
+      (getDocs as jest.Mock).mockResolvedValueOnce({
+        docs: [
+          {
+            id: 'doc-filt',
+            data: () => ({
+              status: 'pending_verification',
+              observationType: 'blocked_road',
+              district: 'Ratnapura',
+              hazardEventId: 'ev-ratnapura',
+              createdAt: '2026-10-09T06:00:00.000Z',
+            }),
+          },
+        ],
+      });
+
+      const reports = await getAllReports({
+        status: 'pending_verification',
+        observationType: 'blocked_road',
+        district: 'Ratnapura',
+        hazardEventId: 'ev-ratnapura',
+      });
+
+      expect(reports).toHaveLength(1);
+      expect(reports[0].id).toBe('doc-filt');
+    });
+
+    it('fetches all reports ignoring "all" filter values', async () => {
+      (getDocs as jest.Mock).mockResolvedValueOnce({
+        docs: [],
+      });
+
+      const reports = await getAllReports({
+        status: 'all',
+        observationType: 'all',
+        district: 'all',
+      });
+
+      expect(reports).toEqual([]);
+    });
+
+    it('retrieves reports linked to a hazard event with specific or all statuses', async () => {
+      (getDocs as jest.Mock).mockResolvedValueOnce({
+        docs: [
+          {
+            id: 'doc-event-1',
+            data: () => ({
+              hazardEventId: 'ev-100',
+              status: 'verified',
+              createdAt: '2026-10-09T06:00:00.000Z',
+            }),
+          },
+        ],
+      });
+
+      const eventReports = await getReportsForHazardEvent('ev-100', 'all');
+      expect(eventReports).toHaveLength(1);
+    });
+
+    it('retrieves verified reports for a hazard event', async () => {
+      (getDocs as jest.Mock).mockResolvedValueOnce({
+        docs: [
+          {
+            id: 'doc-event-ver',
+            data: () => ({
+              hazardEventId: 'ev-100',
+              status: 'verified',
+              createdAt: '2026-10-09T06:00:00.000Z',
+            }),
+          },
+        ],
+      });
+
+      const verReports = await getVerifiedReportsForHazardEvent('ev-100');
+      expect(verReports).toHaveLength(1);
+      expect(verReports[0].id).toBe('doc-event-ver');
+    });
+
+    it('calculates ground report statistics aggregation', async () => {
+      (getDocs as jest.Mock).mockResolvedValueOnce({
+        docs: [
+          { data: () => ({ status: 'pending_verification' }) },
+          { data: () => ({ status: 'pending_verification' }) },
+          { data: () => ({ status: 'verified' }) },
+          { data: () => ({ status: 'rejected' }) },
+          { data: () => ({ status: 'info_requested' }) },
+        ],
+      });
+
+      const stats = await getGroundReportStats();
+      expect(stats.total).toBe(5);
+      expect(stats.pending).toBe(2);
+      expect(stats.verified).toBe(1);
+      expect(stats.rejected).toBe(1);
+      expect(stats.infoRequested).toBe(1);
+      expect(stats.offlineQueued).toBe(0);
     });
   });
 });

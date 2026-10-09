@@ -28,6 +28,8 @@ module.exports = {
     'services/groundReportService.ts',
     'services/offlineQueueService.ts',
     'services/photoUploadService.ts',
+    'services/offlineSyncManager.ts',
     'constants/reportPermissions.ts',
+    'constants/observationTypes.ts',
   ],
 };

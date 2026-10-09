@@ -98,5 +98,35 @@ describe('UC02: Ground Report Form Validation Rules', () => {
       expect(getReportPermissions('volunteer').canVerify).toBe(false);
       expect(getReportPermissions('district_officer').canVerify).toBe(false);
     });
+
+    it('returns safe default fallback permissions for null, undefined, or unknown roles', () => {
+      expect(getReportPermissions(null)).toEqual({
+        canSubmit: false,
+        canVerify: false,
+        canSeeQueue: false,
+        canSeeOwnReports: false,
+        canViewVerifiedReports: true,
+      });
+
+      expect(getReportPermissions(undefined)).toEqual({
+        canSubmit: false,
+        canVerify: false,
+        canSeeQueue: false,
+        canSeeOwnReports: false,
+        canViewVerifiedReports: true,
+      });
+
+      expect(
+        getReportPermissions(
+          'random_invalid_role' as unknown as Parameters<typeof getReportPermissions>[0],
+        ),
+      ).toEqual({
+        canSubmit: false,
+        canVerify: false,
+        canSeeQueue: false,
+        canSeeOwnReports: false,
+        canViewVerifiedReports: true,
+      });
+    });
   });
 });
