@@ -63,6 +63,7 @@ function mapWarningDoc(docSnap: DocumentSnapshot<DocumentData>): HazardWarning {
     channels,
     deliveryChannels: channels,
     channelResults: d.channelResults || [],
+    previousWarningId: d.previousWarningId || null,
     status: d.status || 'delivered',
     issuedBy,
     issuedByUid: issuedBy,
@@ -120,6 +121,25 @@ export async function getAllWarnings(): Promise<HazardWarning[]> {
     return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
     console.warn('Notice fetching all warnings:', error);
+    return [];
+  }
+}
+
+/**
+ * Fetch all warnings associated with a specific hazard event ID.
+ */
+export async function getWarningsForEvent(eventId: string): Promise<HazardWarning[]> {
+  if (!eventId) return [];
+  try {
+    const q = query(
+      collection(db, COLLECTION),
+      where('eventId', '==', eventId),
+    );
+    const snapshot = await getDocs(q);
+    const items = snapshot.docs.map(mapWarningDoc);
+    return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (error) {
+    console.warn(`Notice fetching warnings for event ${eventId}:`, error);
     return [];
   }
 }
@@ -204,7 +224,7 @@ export async function saveDeliveryLogs(
 export async function getGroundReportsForEvent(
   hazardEventId: string,
 ): Promise<VerifiedGroundReportStub[]> {
-  if (!hazardEventId) return getSampleGroundReports();
+  if (!hazardEventId) return [];
   try {
     const q = query(
       collection(db, 'groundReports'),
@@ -213,7 +233,7 @@ export async function getGroundReportsForEvent(
     );
     const snap = await getDocs(q);
     if (snap.empty) {
-      return getSampleGroundReports(hazardEventId);
+      return [];
     }
     return snap.docs.map((d) => {
       const data = d.data();
@@ -225,39 +245,21 @@ export async function getGroundReportsForEvent(
         locationName: data.locationName || 'River Basin',
         description: data.description || 'Ground level water rapidly rising above threshold.',
         observationType: data.observationType,
-        severity: data.observationType === 'landslide_crack' || data.observationType === 'rising_water' ? 'high' : 'medium',
+        severity:
+          data.observationType === 'landslide_crack' || data.observationType === 'rising_water'
+            ? 'high'
+            : 'medium',
         verifiedBy: data.verifiedByName || data.verifiedBy || 'DMC Duty Officer',
-        reportedAt: data.captureTime || data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+        reportedAt:
+          data.captureTime ||
+          data.createdAt?.toDate?.()?.toISOString() ||
+          new Date().toISOString(),
       };
     });
-  } catch {
-    return getSampleGroundReports(hazardEventId);
+  } catch (error) {
+    console.warn('Notice fetching verified ground reports for event:', error);
+    return [];
   }
-}
-
-function getSampleGroundReports(hazardEventId: string = ''): VerifiedGroundReportStub[] {
-  return [
-    {
-      id: 'report-001',
-      hazardEventId,
-      district: 'Ratnapura',
-      locationName: 'Ratnapura Town Center & Kalu River Causeway',
-      description: 'Water level crossed major flood spill threshold (5.8m). Low-lying homes submerged.',
-      severity: 'critical',
-      verifiedBy: 'DMC District Inspector Bandara',
-      reportedAt: new Date(Date.now() - 30 * 60000).toISOString(),
-    },
-    {
-      id: 'report-002',
-      hazardEventId,
-      district: 'Kalutara',
-      locationName: 'Millaniya River Crossing Corridor',
-      description: 'Severe surface runoff blocking main evacuations routes. Evacuation assistance needed.',
-      severity: 'high',
-      verifiedBy: 'Red Cross Field Lead Perera',
-      reportedAt: new Date(Date.now() - 15 * 60000).toISOString(),
-    },
-  ];
 }
 
 /**
@@ -322,6 +324,7 @@ export async function createWarningDocument(
     instructions: payload.instructions.trim(),
     channels: selectedChannels,
     deliveryChannels: selectedChannels,
+    previousWarningId: payload.previousWarningId || null,
     status: 'dispatching' as WarningStatus,
     issuedBy: issuedByUid,
     issuedByUid,
@@ -422,6 +425,7 @@ export async function executeWarningDispatchPipeline(
     instructions: payload.instructions.trim(),
     channels: selectedChannels,
     deliveryChannels: selectedChannels,
+    previousWarningId: payload.previousWarningId || null,
     status: 'dispatching' as WarningStatus,
     issuedBy: issuedByUid,
     issuedByUid,

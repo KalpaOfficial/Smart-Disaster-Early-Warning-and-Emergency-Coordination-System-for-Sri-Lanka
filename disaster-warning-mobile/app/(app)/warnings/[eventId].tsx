@@ -28,9 +28,9 @@ import { EmptyState } from '@/components/EmptyState';
 import { MobileNavBar } from '@/components/MobileNavBar';
 import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/colors';
 import { getHazardEvent } from '@/services/hazardEventService';
-import { getGroundReportsForEvent } from '@/services/warningService';
+import { getGroundReportsForEvent, getWarningsForEvent } from '@/services/warningService';
 import type { HazardEvent } from '@/types/resources';
-import type { VerifiedGroundReportStub } from '@/types/warning';
+import type { VerifiedGroundReportStub, HazardWarning } from '@/types/warning';
 
 export default function HazardEventDetailsScreen() {
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
@@ -43,10 +43,11 @@ export default function HazardEventDetailsScreen() {
   // Component State
   const [event, setEvent] = useState<HazardEvent | null>(null);
   const [groundReports, setGroundReports] = useState<VerifiedGroundReportStub[]>([]);
+  const [existingWarnings, setExistingWarnings] = useState<HazardWarning[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch Event by Firestore ID & Ground Reports
+  // Fetch Event by Firestore ID, Ground Reports & Issued Warnings
   const fetchEventDetails = useCallback(async () => {
     if (!eventId) {
       setLoading(false);
@@ -56,13 +57,15 @@ export default function HazardEventDetailsScreen() {
     setLoading(true);
 
     try {
-      const [evtData, reportsData] = await Promise.all([
+      const [evtData, reportsData, warningsData] = await Promise.all([
         getHazardEvent(eventId),
         getGroundReportsForEvent(eventId),
+        getWarningsForEvent(eventId),
       ]);
 
       setEvent(evtData);
       setGroundReports(reportsData);
+      setExistingWarnings(warningsData);
     } catch (err) {
       console.error('Error fetching hazard event details from Firestore:', err);
       setError('Failed to fetch hazard event details. Please check your connection.');
@@ -241,9 +244,125 @@ export default function HazardEventDetailsScreen() {
                   </TouchableOpacity>
                 ))
               ) : (
-                <Text style={styles.noReportsText}>No ground reports verified yet for this hazard event.</Text>
+                <View style={styles.noReportsBox}>
+                  <View style={styles.noReportsHeader}>
+                    <Ionicons name="information-circle-outline" size={18} color={Colors.accent.primary} />
+                    <Text style={styles.noReportsTitle}>No verified ground reports available for this hazard event.</Text>
+                  </View>
+                  <Text style={styles.noReportsText}>
+                    Standard Operating Procedure: The absence of citizen ground observations does not indicate the absence of hazard conditions. The Duty Officer may continue to issue an official warning if regional sensor telemetry, river gauges, and meteorological forecasts warrant action.
+                  </Text>
+                </View>
               )}
             </Card>
+
+            {/* Issued Warnings for this Event Card */}
+            {existingWarnings.length > 0 && (
+              <Card style={styles.cardSection}>
+                <View style={styles.cardHeaderRow}>
+                  <Ionicons name="notifications" size={18} color="#F59E0B" />
+                  <Text style={styles.cardSectionTitle}>ISSUED WARNINGS ({existingWarnings.length})</Text>
+                </View>
+
+                {existingWarnings.map((warn) => (
+                  <View key={warn.id} style={styles.existingWarningCard}>
+                    <View style={styles.existingWarningHeader}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                        <View
+                          style={[
+                            styles.severityIndicatorDot,
+                            {
+                              backgroundColor:
+                                warn.severity === 'evacuation'
+                                  ? Colors.danger
+                                  : warn.severity === 'warning'
+                                  ? '#F59E0B'
+                                  : '#FCD34D',
+                            },
+                          ]}
+                        />
+                        <Text style={styles.existingWarningHeadline} numberOfLines={1}>
+                          {warn.headline}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.existingWarningSeverityBadge,
+                          {
+                            backgroundColor:
+                              warn.severity === 'evacuation'
+                                ? 'rgba(239, 68, 68, 0.2)'
+                                : warn.severity === 'warning'
+                                ? 'rgba(245, 158, 11, 0.2)'
+                                : 'rgba(234, 179, 8, 0.2)',
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.existingWarningSeverityText,
+                            {
+                              color:
+                                warn.severity === 'evacuation'
+                                  ? Colors.danger
+                                  : warn.severity === 'warning'
+                                  ? '#F59E0B'
+                                  : '#FCD34D',
+                            },
+                          ]}
+                        >
+                          {warn.severity.toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {warn.previousWarningId && (
+                      <View style={styles.escalatedNoticeRow}>
+                        <Ionicons name="trending-up" size={12} color="#F59E0B" />
+                        <Text style={styles.escalatedNoticeText}>
+                          Escalated from #{warn.previousWarningId.slice(-6).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+
+                    <Text style={styles.existingWarningMeta}>
+                      Target: {warn.targetAreas.join(', ')} • {warn.recipientCount.toLocaleString()} recipients
+                    </Text>
+
+                    <View style={styles.existingWarningBtnRow}>
+                      <Button
+                        title="Summary"
+                        variant="secondary"
+                        size="sm"
+                        icon={<Ionicons name="stats-chart-outline" size={14} color="#FFFFFF" />}
+                        onPress={() =>
+                          router.push({
+                            pathname: '/(app)/warnings/summary',
+                            params: { warningId: warn.id, eventId },
+                          } as never)
+                        }
+                        style={{ flex: 1 }}
+                      />
+                      {isDmcOfficer && (
+                        <Button
+                          title="Escalate"
+                          variant="danger"
+                          size="sm"
+                          icon={<Ionicons name="trending-up-outline" size={14} color="#FFFFFF" />}
+                          onPress={() =>
+                            router.push({
+                              pathname: '/(app)/warnings/compose',
+                              params: { eventId, escalateWarningId: warn.id },
+                            } as never)
+                          }
+                          style={{ flex: 1 }}
+                        />
+                      )}
+                    </View>
+                  </View>
+                ))}
+              </Card>
+            )}
 
             {/* Clear "ISSUE WARNING" Primary CTA Action */}
             <View style={styles.actionSection}>
@@ -500,10 +619,29 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 4,
   },
+  noReportsBox: {
+    padding: Spacing.md,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    gap: Spacing.xs,
+  },
+  noReportsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  noReportsTitle: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.accent.primary,
+    flex: 1,
+  },
   noReportsText: {
     fontSize: FontSize.xs,
     color: Colors.text.tertiary,
-    fontStyle: 'italic',
+    lineHeight: 18,
   },
   actionSection: {
     marginTop: Spacing.sm,
@@ -566,5 +704,60 @@ const styles = StyleSheet.create({
   },
   retryBtn: {
     minWidth: 160,
+  },
+  existingWarningCard: {
+    backgroundColor: '#0F172A',
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    marginBottom: Spacing.sm,
+  },
+  existingWarningHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.xs,
+  },
+  severityIndicatorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  existingWarningHeadline: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.text.primary,
+    flex: 1,
+  },
+  existingWarningSeverityBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+  },
+  existingWarningSeverityText: {
+    fontSize: FontSize.micro,
+    fontWeight: '800',
+  },
+  escalatedNoticeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  escalatedNoticeText: {
+    fontSize: FontSize.micro,
+    fontWeight: '700',
+    color: '#F59E0B',
+  },
+  existingWarningMeta: {
+    fontSize: FontSize.micro,
+    color: Colors.text.tertiary,
+    marginBottom: Spacing.sm,
+  },
+  existingWarningBtnRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: 4,
   },
 });

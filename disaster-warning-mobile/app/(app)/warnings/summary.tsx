@@ -20,6 +20,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '@/hooks/useAuth';
 import { ScreenContainer } from '@/components/ScreenContainer';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
@@ -41,6 +42,8 @@ const CHANNEL_CONFIG: Record<
 export default function WarningDeliverySummaryScreen() {
   const params = useLocalSearchParams<{ warningId?: string; eventId?: string }>();
   const router = useRouter();
+  const { state: authState } = useAuth();
+  const isDmcOfficer = authState.user?.role === 'dmc_officer';
 
   const warningId = params.warningId || '';
 
@@ -94,6 +97,18 @@ export default function WarningDeliverySummaryScreen() {
     } else {
       router.push('/(app)/warnings' as never);
     }
+  };
+
+  // Navigate to Warning Composer with escalation context
+  const handleEscalateWarning = () => {
+    const targetEventId = warning?.eventId || params.eventId;
+    router.push({
+      pathname: '/(app)/warnings/compose',
+      params: {
+        eventId: targetEventId,
+        escalateWarningId: warning?.id || warningId,
+      },
+    } as never);
   };
 
   // Helper for overall status branding & labels
@@ -325,6 +340,18 @@ export default function WarningDeliverySummaryScreen() {
                     {warning.channels.map((c) => CHANNEL_CONFIG[c]?.label || c).join(', ')}
                   </Text>
                 </View>
+
+                {warning.previousWarningId && (
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Escalated From:</Text>
+                    <View style={styles.priorWarningPill}>
+                      <Ionicons name="git-branch-outline" size={12} color="#F59E0B" />
+                      <Text style={styles.priorWarningPillText}>
+                        Warning #{warning.previousWarningId.slice(-6).toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+                )}
               </View>
             </Card>
 
@@ -401,13 +428,23 @@ export default function WarningDeliverySummaryScreen() {
               </Text>
             </Card>
 
-            {/* Action Button: Return to Hazard Event */}
+            {/* Action Buttons: Escalate Warning & Return to Hazard Event */}
             <View style={styles.actionContainer}>
+              {isDmcOfficer && (
+                <Button
+                  title="Escalate Warning (Raise Severity)"
+                  variant="danger"
+                  size="lg"
+                  icon={<Ionicons name="trending-up-outline" size={20} color="#FFFFFF" />}
+                  onPress={handleEscalateWarning}
+                  style={styles.escalateBtn}
+                />
+              )}
               <Button
                 title="Return to Hazard Event"
-                variant="primary"
+                variant={isDmcOfficer ? 'secondary' : 'primary'}
                 size="lg"
-                icon={<Ionicons name="arrow-back-circle-outline" size={22} color="#FFFFFF" />}
+                icon={<Ionicons name="arrow-back-circle-outline" size={20} color="#FFFFFF" />}
                 onPress={handleReturnToEvent}
                 style={styles.returnBtn}
               />
@@ -712,8 +749,28 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
     marginBottom: Spacing.xl,
   },
+  escalateBtn: {
+    width: '100%',
+    marginBottom: Spacing.sm,
+  },
   returnBtn: {
     width: '100%',
+  },
+  priorWarningPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.35)',
+  },
+  priorWarningPillText: {
+    fontSize: FontSize.micro,
+    fontWeight: '800',
+    color: '#F59E0B',
   },
   actionBtn: {
     marginTop: Spacing.md,

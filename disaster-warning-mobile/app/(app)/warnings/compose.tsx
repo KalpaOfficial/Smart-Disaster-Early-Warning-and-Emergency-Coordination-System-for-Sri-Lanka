@@ -40,6 +40,7 @@ import { getHazardEvent } from '@/services/hazardEventService';
 import { resolveRecipients } from '@/services/recipientService';
 import {
   executeWarningDispatchPipeline,
+  getWarningById,
   type WarningDispatchPipelineResult,
 } from '@/services/warningService';
 import type { ChannelExecutionOptions } from '@/services/deliveryService';
@@ -49,6 +50,7 @@ import type {
   TargetMode,
   DeliveryChannel,
   CreateWarningPayload,
+  HazardWarning,
 } from '@/types/warning';
 
 const SEVERITY_OPTIONS: { label: string; value: WarningSeverity }[] = [
@@ -64,15 +66,19 @@ const AVAILABLE_CHANNELS: { id: DeliveryChannel; label: string; icon: keyof type
 ];
 
 export default function WarningComposerScreen() {
-  const { eventId } = useLocalSearchParams<{ eventId?: string }>();
+  const { eventId, escalateWarningId } = useLocalSearchParams<{
+    eventId?: string;
+    escalateWarningId?: string;
+  }>();
   const router = useRouter();
   const { state } = useAuth();
   const user = state.user;
 
   const isDmcOfficer = user?.role === 'dmc_officer';
 
-  // Selected Hazard Event State
+  // Selected Hazard Event & Prior Warning State
   const [event, setEvent] = useState<HazardEvent | null>(null);
+  const [escalatedWarning, setEscalatedWarning] = useState<HazardWarning | null>(null);
   const [loadingEvent, setLoadingEvent] = useState(true);
   const [eventError, setEventError] = useState<string | null>(null);
 
@@ -99,11 +105,11 @@ export default function WarningComposerScreen() {
   const [showPayloadModal, setShowPayloadModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Fetch Event from Cloud Firestore by ID
+  // Fetch Event & Prior Warning from Cloud Firestore by ID
   const fetchEvent = useCallback(async () => {
-    if (!eventId) {
+    if (!eventId && !escalateWarningId) {
       setLoadingEvent(false);
-      setEventError('No hazard event ID specified.');
+      setEventError('No hazard event or prior warning specified.');
       return;
     }
 
@@ -111,12 +117,53 @@ export default function WarningComposerScreen() {
     setEventError(null);
 
     try {
-      const fetchedEvent = await getHazardEvent(eventId);
-      if (fetchedEvent) {
-        setEvent(fetchedEvent);
-        setHazardType(fetchedEvent.hazardType);
+      let fetchedEvent: HazardEvent | null = null;
+      let fetchedWarning: HazardWarning | null = null;
 
-        // Pre-fill target areas from event if available
+      if (escalateWarningId) {
+        fetchedWarning = await getWarningById(escalateWarningId);
+        if (fetchedWarning) {
+          setEscalatedWarning(fetchedWarning);
+        }
+      }
+
+      const targetEventId = eventId || fetchedWarning?.eventId;
+      if (targetEventId) {
+        fetchedEvent = await getHazardEvent(targetEventId);
+        if (fetchedEvent) {
+          setEvent(fetchedEvent);
+          setHazardType(fetchedEvent.hazardType);
+        }
+      }
+
+      if (fetchedWarning) {
+        // Warning Escalation Mode: prefill parameters and raise severity
+        setHazardType(fetchedWarning.hazardType);
+        setTargetMode(fetchedWarning.targetMode);
+        setTargetAreas(fetchedWarning.targetAreas);
+
+        // Elevate severity: advisory -> warning; warning -> evacuation; evacuation remains evacuation
+        let elevatedSeverity: WarningSeverity = 'evacuation';
+        if (fetchedWarning.severity === 'advisory') {
+          elevatedSeverity = 'warning';
+        } else if (fetchedWarning.severity === 'warning') {
+          elevatedSeverity = 'evacuation';
+        }
+        setSeverity(elevatedSeverity);
+
+        if (fetchedWarning.deliveryChannels && fetchedWarning.deliveryChannels.length > 0) {
+          setDeliveryChannels(fetchedWarning.deliveryChannels);
+        }
+
+        const baseHeadline = fetchedWarning.headline.replace(/^ESCALATED ALERT:\s*/i, '');
+        setHeadline(`ESCALATED ALERT: ${baseHeadline}`);
+        setInstructions(
+          fetchedWarning.instructions
+            ? `${fetchedWarning.instructions}\n\n[ESCALATION NOTICE]: Hazard situation has intensified. Immediate emergency precautionary/evacuation actions required.`
+            : `Severe threat escalation. Follow official directives from DMC duty officers immediately.`
+        );
+      } else if (fetchedEvent) {
+        // Normal compose mode: pre-fill target areas from event if available
         if (fetchedEvent.affectedDistricts && fetchedEvent.affectedDistricts.length > 0) {
           setTargetAreas(fetchedEvent.affectedDistricts);
           setTargetMode('district');
@@ -131,7 +178,7 @@ export default function WarningComposerScreen() {
           `Residents in targeted areas must move to higher ground immediately. Follow official instructions from DMC duty officers.`
         );
       } else {
-        setEventError(`Hazard event matching ID "${eventId}" was not found.`);
+        setEventError('Could not load hazard event or prior warning details from Cloud Firestore.');
       }
     } catch (err) {
       console.error('Error fetching hazard event for composer:', err);
@@ -139,7 +186,7 @@ export default function WarningComposerScreen() {
     } finally {
       setLoadingEvent(false);
     }
-  }, [eventId]);
+  }, [eventId, escalateWarningId]);
 
   useEffect(() => {
     fetchEvent();
@@ -240,9 +287,9 @@ export default function WarningComposerScreen() {
 
     try {
       const payload: CreateWarningPayload = {
-        eventId: event?.id || eventId || '',
-        hazardEventId: event?.id || eventId || '',
-        hazardEventTitle: event?.title || 'Open Hazard Event',
+        eventId: event?.id || eventId || escalatedWarning?.eventId || '',
+        hazardEventId: event?.id || eventId || escalatedWarning?.eventId || '',
+        hazardEventTitle: event?.title || escalatedWarning?.hazardEventTitle || 'Open Hazard Event',
         hazardType,
         severity: severity as WarningSeverity,
         targetMode,
@@ -253,6 +300,7 @@ export default function WarningComposerScreen() {
         instructions: instructions.trim(),
         channels: deliveryChannels,
         deliveryChannels,
+        previousWarningId: escalateWarningId || undefined,
       };
 
       // Build channel execution options based on selected simulation mode
@@ -342,7 +390,7 @@ export default function WarningComposerScreen() {
             <Text style={styles.stateTitle}>Loading Hazard Event...</Text>
             <Text style={styles.stateDesc}>Fetching document from Cloud Firestore.</Text>
           </Card>
-        ) : eventError && !event ? (
+        ) : eventError && !event && !escalatedWarning ? (
           /* Error State */
           <Card style={styles.errorCard}>
             <Ionicons name="alert-circle" size={36} color={Colors.danger} />
@@ -365,6 +413,27 @@ export default function WarningComposerScreen() {
                 <Text style={styles.heroTitle}>{event.title}</Text>
                 <Text style={styles.heroDesc}>{event.description}</Text>
               </LinearGradient>
+            )}
+
+            {/* Escalation Mode Banner */}
+            {escalatedWarning && (
+              <Card style={styles.escalationBanner}>
+                <View style={styles.escalationBannerHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
+                    <Ionicons name="trending-up" size={18} color="#F59E0B" />
+                    <Text style={styles.escalationBannerTitle}>WARNING ESCALATION MODE</Text>
+                  </View>
+                  <View style={styles.escalationBadge}>
+                    <Text style={styles.escalationBadgeText}>
+                      LINKED #{escalatedWarning.id.slice(-6).toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.escalationBannerDesc}>
+                  You are raising alert severity for previous warning #{escalatedWarning.id.slice(-6).toUpperCase()}.
+                  Original severity ({escalatedWarning.severity?.toUpperCase()}) elevated to {severity ? severity.toUpperCase() : 'NEW LEVEL'}.
+                </Text>
+              </Card>
             )}
 
             {/* Validation Errors Notice */}
@@ -1407,6 +1476,42 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   dispatchingProgressDesc: {
+    fontSize: FontSize.xs,
+    color: Colors.text.secondary,
+    lineHeight: 18,
+  },
+  escalationBanner: {
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+  },
+  escalationBannerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.xs,
+  },
+  escalationBannerTitle: {
+    fontSize: FontSize.xs,
+    fontWeight: '900',
+    color: '#F59E0B',
+    letterSpacing: 0.8,
+  },
+  escalationBadge: {
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+  },
+  escalationBadgeText: {
+    fontSize: FontSize.micro,
+    fontWeight: '800',
+    color: '#FCD34D',
+  },
+  escalationBannerDesc: {
     fontSize: FontSize.xs,
     color: Colors.text.secondary,
     lineHeight: 18,

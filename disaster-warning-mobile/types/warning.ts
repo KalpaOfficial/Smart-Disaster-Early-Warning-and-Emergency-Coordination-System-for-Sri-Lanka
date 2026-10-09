@@ -50,6 +50,7 @@ export interface HazardWarning {
   channels: DeliveryChannel[];
   deliveryChannels?: DeliveryChannel[];
   channelResults?: ChannelDeliveryResult[];
+  previousWarningId?: string | null;
   status: WarningStatus;
   issuedBy: string;
   issuedByUid?: string;
@@ -73,6 +74,7 @@ export interface CreateWarningPayload {
   instructions: string;
   channels: DeliveryChannel[];
   deliveryChannels?: DeliveryChannel[];
+  previousWarningId?: string | null;
 }
 
 export interface DeliveryLog {

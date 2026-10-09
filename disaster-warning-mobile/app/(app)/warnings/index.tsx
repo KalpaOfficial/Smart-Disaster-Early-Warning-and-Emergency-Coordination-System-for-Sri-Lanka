@@ -209,6 +209,14 @@ export default function IssueHazardWarningScreen() {
     [activeEvents, selectedEventId],
   );
 
+  // Navigate to Event Details screen (Screen 2 — Review Evidence & Summary)
+  const handleOpenEventDetails = (event: HazardEvent) => {
+    router.push({
+      pathname: '/(app)/warnings/[eventId]',
+      params: { eventId: event.id },
+    } as never);
+  };
+
   // Navigate to Warning Composer screen for selected event
   const handleOpenComposerForEvent = (event: HazardEvent) => {
     router.push({
@@ -516,14 +524,23 @@ export default function IssueHazardWarningScreen() {
                   ))}
                 </View>
 
-                {/* Clear "View Event & Issue Warning" Action Button */}
-                <Button
-                  title="View Event &amp; Issue Warning"
-                  variant="primary"
-                  icon={<Ionicons name="megaphone-outline" size={18} color="#FFFFFF" />}
-                  onPress={() => handleOpenComposerForEvent(event)}
-                  style={styles.viewEventBtn}
-                />
+                {/* Screen 1 Actions: Primary "Open Event", Secondary "Issue Warning" */}
+                <View style={styles.eventActionRow}>
+                  <Button
+                    title="Open Event"
+                    variant="primary"
+                    icon={<Ionicons name="eye-outline" size={16} color="#FFFFFF" />}
+                    onPress={() => handleOpenEventDetails(event)}
+                    style={styles.openEventBtn}
+                  />
+                  <Button
+                    title="Issue Warning"
+                    variant="secondary"
+                    icon={<Ionicons name="megaphone-outline" size={16} color={Colors.accent.primary} />}
+                    onPress={() => handleOpenComposerForEvent(event)}
+                    style={styles.quickIssueBtn}
+                  />
+                </View>
               </Card>
             );
           })
@@ -1041,6 +1058,18 @@ const styles = StyleSheet.create({
   },
   viewEventBtn: {
     marginTop: Spacing.xs,
+  },
+  eventActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
+  },
+  openEventBtn: {
+    flex: 1,
+  },
+  quickIssueBtn: {
+    flex: 1,
   },
   stateCard: {
     alignItems: 'center',
