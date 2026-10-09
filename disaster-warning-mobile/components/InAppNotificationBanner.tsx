@@ -22,7 +22,6 @@ export function InAppNotificationBanner({
 }: InAppNotificationBannerProps) {
   const isVerified = notification.status === 'verified';
   const isRejected = notification.status === 'rejected';
-  const isInfoRequested = notification.status === 'info_requested';
 
   const iconName: keyof typeof Ionicons.glyphMap = isVerified
     ? 'checkmark-circle'

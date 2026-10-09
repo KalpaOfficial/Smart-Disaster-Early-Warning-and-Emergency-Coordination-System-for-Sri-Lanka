@@ -22,6 +22,7 @@ import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { InAppNotificationBanner } from '@/components/InAppNotificationBanner';
 import { EmptyState } from '@/components/EmptyState';
 import { Colors, BorderRadius, Spacing, FontSize } from '@/constants/colors';
+import { getReportPermissions } from '@/constants/reportPermissions';
 import { useAuth } from '@/hooks/useAuth';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { useReportNotifications } from '@/hooks/useReportNotifications';
@@ -40,7 +41,7 @@ import {
   subscribeToSyncProgress,
   triggerSyncNow,
 } from '@/services/offlineSyncManager';
-import type { GroundReport, ReportStatus } from '@/types/groundReport';
+import type { GroundReport } from '@/types/groundReport';
 import type { HazardEvent } from '@/types/resources';
 
 type OfficerTab = 'pending' | 'info_requested' | 'all';
@@ -56,8 +57,10 @@ export default function ReportListScreen() {
   const router = useRouter();
   const user = authState.user;
 
-  const isOfficer = user?.role === 'dmc_officer';
-  const canSubmit = user?.role === 'citizen' || user?.role === 'volunteer';
+  const permissions = getReportPermissions(user?.role);
+  const isOfficer = permissions.canSeeQueue;
+  const canSubmit = permissions.canSubmit;
+  const isDistrictOfficer = user?.role === 'district_officer';
 
   const { isOffline } = useNetworkStatus();
   const {
@@ -90,14 +93,24 @@ export default function ReportListScreen() {
         } else {
           data = await getAllReports();
         }
-      } else {
+      } else if (permissions.canSeeOwnReports) {
         data = await getMyReports(user.id);
+      } else {
+        // District Officer (UC02 Phase 7.3): Situational Awareness feed of verified reports
+        data = await getAllReports({
+          status: 'verified',
+          district: user.district || undefined,
+        });
+        if (data.length === 0) {
+          // If no reports in user's specific district, show all verified reports across Sri Lanka
+          data = await getAllReports({ status: 'verified' });
+        }
       }
       setReports(data);
     } catch (err) {
       console.warn('Failed to fetch reports:', err);
     }
-  }, [user, isOfficer, activeTab]);
+  }, [user, isOfficer, permissions.canSeeOwnReports, activeTab]);
 
   const fetchOfflineCount = useCallback(async () => {
     try {
@@ -212,9 +225,16 @@ export default function ReportListScreen() {
     );
   };
 
-  const headerTitle = isOfficer ? 'Verification Queue' : 'My Ground Reports';
+  const headerTitle = isOfficer
+    ? 'Verification Queue'
+    : isDistrictOfficer
+    ? 'District Ground Observations'
+    : 'My Ground Reports';
+
   const headerSubtitle = isOfficer
     ? `${reports.length} report${reports.length !== 1 ? 's' : ''} awaiting review`
+    : isDistrictOfficer
+    ? `${reports.length} verified observation${reports.length !== 1 ? 's' : ''} • Situational Feed`
     : `${reports.length} submitted report${reports.length !== 1 ? 's' : ''}`;
 
   return (
@@ -308,10 +328,18 @@ export default function ReportListScreen() {
           ListEmptyComponent={
             <EmptyState
               iconName="document-text-outline"
-              title={isOfficer ? 'Queue Clear' : 'No Reports Yet'}
+              title={
+                isOfficer
+                  ? 'Queue Clear'
+                  : isDistrictOfficer
+                  ? 'No Verified Observations'
+                  : 'No Reports Yet'
+              }
               message={
                 isOfficer
                   ? 'No ground reports in this category awaiting verification.'
+                  : isDistrictOfficer
+                  ? `No verified hazard observations currently recorded for ${user?.district || 'this operational sector'}.`
                   : 'Submit your first ground hazard observation to help the Disaster Management Centre respond faster.'
               }
             />

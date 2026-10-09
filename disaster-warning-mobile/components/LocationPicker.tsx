@@ -12,7 +12,6 @@ import {
   ActivityIndicator,
   TextInput,
   Platform,
-  Alert,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,9 +21,12 @@ import { Select } from './Select';
 import type { GeoLocation } from '@/types/groundReport';
 
 // Optional native MapView import
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
 let MapView: any = null;
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
 let Marker: any = null;
 try {
+  /* eslint-disable-next-line @typescript-eslint/no-require-imports */
   const maps = require('react-native-maps');
   MapView = maps.default || maps.MapView;
   Marker = maps.Marker;
@@ -43,6 +45,15 @@ interface LocationPickerProps {
   onLocationNameChange: (name: string) => void;
   onDistrictChange: (district: string) => void;
   error?: string | null;
+}
+
+interface MapEventWithCoordinate {
+  nativeEvent?: {
+    coordinate?: {
+      latitude: number;
+      longitude: number;
+    };
+  };
 }
 
 export function LocationPicker({
@@ -180,7 +191,7 @@ export function LocationPicker({
                 latitudeDelta: 0.05,
                 longitudeDelta: 0.05,
               }}
-              onPress={(e: any) => {
+              onPress={(e: MapEventWithCoordinate) => {
                 const coord = e.nativeEvent?.coordinate;
                 if (coord) {
                   onLocationChange(coord, true);
@@ -193,7 +204,7 @@ export function LocationPicker({
                   longitude: location.longitude,
                 }}
                 draggable
-                onDragEnd={(e: any) => {
+                onDragEnd={(e: MapEventWithCoordinate) => {
                   const coord = e.nativeEvent?.coordinate;
                   if (coord) {
                     onLocationChange(coord, true);

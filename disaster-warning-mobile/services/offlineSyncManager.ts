@@ -38,7 +38,7 @@ class OfflineSyncManager {
   private netInfoUnsubscribe: NetInfoSubscription | null = null;
   private isAutoSyncEnabled = false;
   private listeners: Set<SyncEventListener> = new Set();
-  private retryTimeoutId: any = null;
+  private retryTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private currentProgress: SyncProgressEvent = {
     state: 'idle',
     total: 0,

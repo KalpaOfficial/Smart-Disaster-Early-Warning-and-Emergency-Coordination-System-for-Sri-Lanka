@@ -106,6 +106,12 @@ export default function DashboardScreen() {
       if (user?.role === 'dmc_officer') {
         const pending = await getPendingReports().catch(() => []);
         setRecentReports(pending.slice(0, 3));
+      } else if (user?.role === 'district_officer') {
+        const districtVerified = await getAllReports({
+          status: 'verified',
+          district: user?.district || undefined,
+        }).catch(() => []);
+        setRecentReports(districtVerified.slice(0, 3));
       } else if (user?.id) {
         const mine = await getMyReports(user.id).catch(() => []);
         setMyReportsCount(mine.length);
@@ -471,12 +477,13 @@ export default function DashboardScreen() {
         })()}
 
         {/* Ground Hazard Report (UC02) Quick Action Banner */}
-        {/* Ground Hazard Report (UC02) Quick Action Banner */}
         <View style={styles.groundReportBanner}>
           <LinearGradient
             colors={
               user?.role === 'dmc_officer'
                 ? ['#0C4A6E', '#0F172A']
+                : user?.role === 'district_officer'
+                ? ['#1E1B4B', '#0F172A']
                 : ['#065F46', '#0F172A']
             }
             start={{ x: 0, y: 0 }}
@@ -495,14 +502,28 @@ export default function DashboardScreen() {
                     backgroundColor:
                       user?.role === 'dmc_officer'
                         ? 'rgba(56, 189, 248, 0.2)'
+                        : user?.role === 'district_officer'
+                        ? 'rgba(168, 85, 247, 0.2)'
                         : 'rgba(16, 185, 129, 0.2)',
                   },
                 ]}
               >
                 <Ionicons
-                  name={user?.role === 'dmc_officer' ? 'shield-checkmark' : 'camera'}
+                  name={
+                    user?.role === 'dmc_officer'
+                      ? 'shield-checkmark'
+                      : user?.role === 'district_officer'
+                      ? 'radio'
+                      : 'camera'
+                  }
                   size={24}
-                  color={user?.role === 'dmc_officer' ? '#38BDF8' : '#10B981'}
+                  color={
+                    user?.role === 'dmc_officer'
+                      ? '#38BDF8'
+                      : user?.role === 'district_officer'
+                      ? '#C084FC'
+                      : '#10B981'
+                  }
                 />
               </View>
               <View style={styles.groundReportContent}>
@@ -512,16 +533,24 @@ export default function DashboardScreen() {
                       styles.groundReportPill,
                       {
                         color:
-                          user?.role === 'dmc_officer' ? '#38BDF8' : '#10B981',
+                          user?.role === 'dmc_officer'
+                            ? '#38BDF8'
+                            : user?.role === 'district_officer'
+                            ? '#C084FC'
+                            : '#10B981',
                         backgroundColor:
                           user?.role === 'dmc_officer'
                             ? 'rgba(56, 189, 248, 0.15)'
+                            : user?.role === 'district_officer'
+                            ? 'rgba(168, 85, 247, 0.15)'
                             : 'rgba(16, 185, 129, 0.15)',
                       },
                     ]}
                   >
                     {user?.role === 'dmc_officer'
                       ? 'DUTY OFFICER VERIFICATION'
+                      : user?.role === 'district_officer'
+                      ? 'DISTRICT SITUATIONAL FEED'
                       : 'GROUND HAZARD OBSERVATION (UC02)'}
                   </Text>
                   {offlineCount > 0 && (
@@ -539,22 +568,32 @@ export default function DashboardScreen() {
                 <Text style={styles.groundReportTitle}>
                   {user?.role === 'dmc_officer'
                     ? `${reportStats.pending} Report${reportStats.pending !== 1 ? 's' : ''} Awaiting Review`
+                    : user?.role === 'district_officer'
+                    ? `${reportStats.verified} Verified Ground Observation${reportStats.verified !== 1 ? 's' : ''}`
                     : 'Submit & Track Field Observations'}
                 </Text>
                 <Text style={styles.groundReportDesc}>
                   {user?.role === 'dmc_officer'
                     ? 'Assess incoming evidence photos and coordinates, and link to active hazard events.'
+                    : user?.role === 'district_officer'
+                    ? 'Monitor verified incident reports to deploy SAR units, open emergency shelters, or dispatch supplies.'
                     : 'Report rising floodwaters, road blockages, or landslide cracks with photo & GPS.'}
                 </Text>
               </View>
               <Ionicons
                 name="chevron-forward"
                 size={20}
-                color={user?.role === 'dmc_officer' ? '#38BDF8' : '#10B981'}
+                color={
+                  user?.role === 'dmc_officer'
+                    ? '#38BDF8'
+                    : user?.role === 'district_officer'
+                    ? '#C084FC'
+                    : '#10B981'
+                }
               />
             </TouchableOpacity>
 
-            {/* Role-Specific Quick Action Buttons (UC02 Phase 7.2) */}
+            {/* Role-Specific Quick Action Buttons (UC02 Phase 7.2 & 7.3) */}
             <View style={styles.bannerActionRow}>
               {user?.role === 'dmc_officer' ? (
                 <TouchableOpacity
@@ -565,6 +604,17 @@ export default function DashboardScreen() {
                   <Ionicons name="list" size={15} color="#080C14" />
                   <Text style={styles.bannerActionBtnPrimaryText}>
                     Open Verification Queue ({reportStats.pending})
+                  </Text>
+                </TouchableOpacity>
+              ) : user?.role === 'district_officer' ? (
+                <TouchableOpacity
+                  style={[styles.bannerActionBtnPrimary, { backgroundColor: '#C084FC' }]}
+                  onPress={() => router.push('/(app)/reports' as never)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="eye-outline" size={15} color="#080C14" />
+                  <Text style={styles.bannerActionBtnPrimaryText}>
+                    View Verified Feed ({reportStats.verified})
                   </Text>
                 </TouchableOpacity>
               ) : (
@@ -610,37 +660,62 @@ export default function DashboardScreen() {
               <View
                 style={[
                   styles.kpiIconBox,
-                  { backgroundColor: 'rgba(56, 189, 248, 0.15)' },
+                  {
+                    backgroundColor:
+                      user?.role === 'district_officer'
+                        ? 'rgba(168, 85, 247, 0.15)'
+                        : 'rgba(56, 189, 248, 0.15)',
+                  },
                 ]}
               >
-                <Ionicons name="document-text-outline" size={20} color="#38BDF8" />
+                <Ionicons
+                  name={user?.role === 'district_officer' ? 'radio' : 'document-text-outline'}
+                  size={20}
+                  color={user?.role === 'district_officer' ? '#C084FC' : '#38BDF8'}
+                />
               </View>
               <Text
                 style={[
                   styles.kpiChange,
                   {
                     color:
-                      reportStats.pending > 0 ? '#F59E0B' : '#10B981',
+                      user?.role === 'dmc_officer'
+                        ? reportStats.pending > 0 ? '#F59E0B' : '#10B981'
+                        : user?.role === 'district_officer'
+                        ? '#C084FC'
+                        : offlineCount > 0
+                        ? '#F59E0B'
+                        : '#10B981',
                   },
                 ]}
               >
                 {user?.role === 'dmc_officer'
                   ? `${reportStats.pending} Pending`
+                  : user?.role === 'district_officer'
+                  ? `${reportStats.verified} Verified`
                   : offlineCount > 0
                   ? `${offlineCount} Offline`
                   : `${reportStats.verified} Verified`}
               </Text>
             </View>
             <Text style={styles.kpiValue}>
-              {user?.role === 'dmc_officer' ? reportStats.pending : myReportsCount}
+              {user?.role === 'dmc_officer'
+                ? reportStats.pending
+                : user?.role === 'district_officer'
+                ? reportStats.verified
+                : myReportsCount}
             </Text>
             <Text style={styles.kpiLabel}>
               {user?.role === 'dmc_officer'
                 ? 'Pending Reports'
+                : user?.role === 'district_officer'
+                ? 'Verified Feed'
                 : 'My Ground Reports'}
             </Text>
             <Text style={styles.kpiSub}>
-              {reportStats.total} Total in System
+              {user?.role === 'district_officer'
+                ? `${user?.district ? `${user.district} & Global` : 'Active Feed'}`
+                : `${reportStats.total} Total in System`}
             </Text>
           </Card>
 

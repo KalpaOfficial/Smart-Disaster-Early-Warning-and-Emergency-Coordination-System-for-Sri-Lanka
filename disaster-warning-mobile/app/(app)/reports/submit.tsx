@@ -24,9 +24,10 @@ import { ScreenContainer } from '@/components/ScreenContainer';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { LocationPicker } from '@/components/LocationPicker';
 import { ObservationTypeBadge } from '@/components/ObservationTypeBadge';
-import { ReportStatusBadge } from '@/components/ReportStatusBadge';
 import { Colors, BorderRadius, Spacing, FontSize } from '@/constants/colors';
 import { OBSERVATION_TYPES } from '@/constants/observationTypes';
+import { getRoleLabel } from '@/constants/roles';
+import { getReportPermissions } from '@/constants/reportPermissions';
 import { useAuth } from '@/hooks/useAuth';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { submitGroundReport } from '@/services/groundReportService';
@@ -40,6 +41,7 @@ export default function SubmitReportScreen() {
   const { state: authState } = useAuth();
   const router = useRouter();
   const user = authState.user;
+  const permissions = getReportPermissions(user?.role);
   const { isOffline } = useNetworkStatus();
 
   // Multi-step state
@@ -68,7 +70,7 @@ export default function SubmitReportScreen() {
 
   const progressPercent = (currentStep / TOTAL_STEPS) * 100;
 
-  const validateStep = (step: number): boolean => {
+  const validateStep = useCallback((step: number): boolean => {
     const newErrors: Record<string, string | null> = {};
 
     switch (step) {
@@ -99,7 +101,7 @@ export default function SubmitReportScreen() {
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  };
+  }, [observationType, description, photoUri, locationName, district]);
 
   const handleNext = () => {
     if (validateStep(currentStep)) {
@@ -117,6 +119,13 @@ export default function SubmitReportScreen() {
 
   const handleSubmit = useCallback(async () => {
     if (!user || !observationType || !photoUri) return;
+    if (!permissions.canSubmit) {
+      Alert.alert(
+        'Submission Prohibited',
+        `Users with role '${user?.role ? getRoleLabel(user.role) : 'Unknown'}' cannot submit ground observations. Only registered citizens and volunteers can submit reports.`,
+      );
+      return;
+    }
     if (!validateStep(4)) return;
 
     setSubmitting(true);
@@ -180,7 +189,7 @@ export default function SubmitReportScreen() {
         });
         setSubmittedOffline(true);
         setSubmitted(true);
-      } catch (queueErr) {
+      } catch (_queueErr) {
         Alert.alert(
           'Submission Failed',
           (err as Error)?.message || 'An unexpected error occurred. Please try again.',
@@ -189,7 +198,18 @@ export default function SubmitReportScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [user, observationType, description, photoUri, location, locationName, district, isManualLocation]);
+  }, [
+    user,
+    observationType,
+    photoUri,
+    permissions.canSubmit,
+    validateStep,
+    description,
+    location,
+    locationName,
+    district,
+    isManualLocation,
+  ]);
 
   // --- Success View ---
   if (submitted) {
@@ -236,6 +256,42 @@ export default function SubmitReportScreen() {
             activeOpacity={0.7}
           >
             <Text style={styles.successBtnSecondaryText}>Back to Dashboard</Text>
+          </TouchableOpacity>
+        </View>
+      </ScreenContainer>
+    );
+  }
+
+  // --- Access Restricted View (UC02 Phase 7.3: Role-Based Access) ---
+  if (!permissions.canSubmit) {
+    return (
+      <ScreenContainer>
+        <View style={styles.restrictedContainer}>
+          <View style={styles.restrictedIconBox}>
+            <Ionicons name="shield-outline" size={48} color={Colors.accent.primary} />
+          </View>
+          <Text style={styles.restrictedTitle}>Submission Access Restricted</Text>
+          <Text style={styles.restrictedDesc}>
+            Ground hazard observations can only be submitted by registered Citizens and Community Disaster Volunteers in the field.
+          </Text>
+          <View style={styles.restrictedRoleBox}>
+            <Text style={styles.restrictedRoleLabel}>Your Current Role:</Text>
+            <Text style={styles.restrictedRoleValue}>
+              {user?.role ? getRoleLabel(user.role) : 'Unassigned'}
+            </Text>
+            <Text style={styles.restrictedRoleHint}>
+              {user?.role === 'dmc_officer'
+                ? 'DMC Duty Officers review and verify incoming citizen reports in the Verification Queue.'
+                : 'District Officers coordinate tactical emergency resources, shelters, and relief distribution.'}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.restrictedBackBtn}
+            onPress={() => router.replace('/(app)/reports' as never)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="arrow-back" size={18} color="#080C14" />
+            <Text style={styles.restrictedBackBtnText}>Back to Reports Hub</Text>
           </TouchableOpacity>
         </View>
       </ScreenContainer>
@@ -898,5 +954,78 @@ const styles = StyleSheet.create({
     color: '#F59E0B',
     fontWeight: '600',
     flex: 1,
+  },
+  restrictedContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xl,
+  },
+  restrictedIconBox: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.lg,
+  },
+  restrictedTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '800',
+    color: Colors.text.primary,
+    textAlign: 'center',
+    marginBottom: Spacing.sm,
+  },
+  restrictedDesc: {
+    fontSize: FontSize.sm,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: Spacing.xl,
+  },
+  restrictedRoleBox: {
+    width: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
+    marginBottom: Spacing.xl,
+    alignItems: 'center',
+  },
+  restrictedRoleLabel: {
+    fontSize: FontSize.micro,
+    color: Colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  restrictedRoleValue: {
+    fontSize: FontSize.md,
+    fontWeight: '800',
+    color: Colors.accent.primary,
+    marginBottom: Spacing.xs,
+  },
+  restrictedRoleHint: {
+    fontSize: FontSize.xs,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 17,
+  },
+  restrictedBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.accent.primary,
+    paddingHorizontal: Spacing.xxl,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md,
+  },
+  restrictedBackBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '800',
+    color: '#080C14',
   },
 });

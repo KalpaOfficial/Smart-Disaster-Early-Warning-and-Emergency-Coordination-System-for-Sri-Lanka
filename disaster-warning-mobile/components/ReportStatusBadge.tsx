@@ -5,7 +5,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, BorderRadius, Spacing, FontSize } from '@/constants/colors';
+import { BorderRadius, Spacing, FontSize } from '@/constants/colors';
 import { getReportStatusDefinition } from '@/constants/observationTypes';
 import type { ReportStatus } from '@/types/groundReport';
 

@@ -65,6 +65,13 @@ export async function queueOfflineReport(
     role: UserRole;
   },
 ): Promise<OfflineReportQueueItem> {
+  // UC02 Phase 7.3: Role-based submission restriction
+  if (submitter.role !== 'citizen' && submitter.role !== 'volunteer') {
+    throw new Error(
+      `Unauthorized: Role '${submitter.role}' cannot queue ground reports. Only citizens and community volunteers can report hazard observations.`,
+    );
+  }
+
   const queue = await getQueuedReports();
   const queueId = `offline-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 

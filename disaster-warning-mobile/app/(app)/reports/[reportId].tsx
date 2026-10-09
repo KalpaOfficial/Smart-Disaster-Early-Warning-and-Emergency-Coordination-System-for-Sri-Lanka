@@ -28,6 +28,7 @@ import { ReportStatusBadge } from '@/components/ReportStatusBadge';
 import { ObservationTypeBadge } from '@/components/ObservationTypeBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { Colors, BorderRadius, Spacing, FontSize } from '@/constants/colors';
+import { getReportPermissions } from '@/constants/reportPermissions';
 import { useAuth } from '@/hooks/useAuth';
 import {
   getReportById,
@@ -42,9 +43,12 @@ import type { GroundReport } from '@/types/groundReport';
 import type { HazardEvent } from '@/types/resources';
 
 // Optional native map support
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
 let MapView: any = null;
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
 let Marker: any = null;
 try {
+  /* eslint-disable-next-line @typescript-eslint/no-require-imports */
   const maps = require('react-native-maps');
   MapView = maps.default || maps.MapView;
   Marker = maps.Marker;
@@ -77,7 +81,8 @@ export default function ReportDetailScreen() {
   // Full screen photo modal
   const [photoModalOpen, setPhotoModalOpen] = useState(false);
 
-  const isOfficer = user?.role === 'dmc_officer';
+  const permissions = getReportPermissions(user?.role);
+  const isOfficer = permissions.canVerify;
   const isSubmitter = user && report && user.id === report.submitterId;
 
   const loadData = useCallback(async () => {
@@ -130,12 +135,16 @@ export default function ReportDetailScreen() {
   // Officer verification submission
   const handleConfirmVerify = async () => {
     if (!report || !user) return;
+    if (!permissions.canVerify) {
+      Alert.alert('Unauthorized', 'Only DMC Duty Officers have verification authority.');
+      return;
+    }
     try {
       setActionLoading(true);
       const chosenEvent = activeEvents.find((e) => e.id === selectedEventId);
       await verifyReport(
         report.id,
-        { uid: user.id, name: user.fullName },
+        { uid: user.id, name: user.fullName, role: user.role },
         {
           hazardEventId: selectedEventId || null,
           hazardEventTitle: chosenEvent?.title || null,
@@ -156,13 +165,21 @@ export default function ReportDetailScreen() {
   // Officer rejection submission
   const handleConfirmReject = async () => {
     if (!report || !user) return;
+    if (!permissions.canVerify) {
+      Alert.alert('Unauthorized', 'Only DMC Duty Officers have verification authority.');
+      return;
+    }
     if (!decisionText.trim()) {
       Alert.alert('Reason Required', 'Please provide an official justification for rejection.');
       return;
     }
     try {
       setActionLoading(true);
-      await rejectReport(report.id, { uid: user.id, name: user.fullName }, decisionText.trim());
+      await rejectReport(
+        report.id,
+        { uid: user.id, name: user.fullName, role: user.role },
+        decisionText.trim(),
+      );
       Alert.alert('Report Rejected', 'The report has been rejected and logged.');
       setActiveAction(null);
       setDecisionText('');
@@ -177,6 +194,10 @@ export default function ReportDetailScreen() {
   // Officer request additional info
   const handleConfirmRequestInfo = async () => {
     if (!report || !user) return;
+    if (!permissions.canVerify) {
+      Alert.alert('Unauthorized', 'Only DMC Duty Officers have verification authority.');
+      return;
+    }
     if (!decisionText.trim()) {
       Alert.alert('Instructions Required', 'Please provide questions or guidance for the submitter.');
       return;
@@ -185,7 +206,7 @@ export default function ReportDetailScreen() {
       setActionLoading(true);
       await requestAdditionalInfo(
         report.id,
-        { uid: user.id, name: user.fullName },
+        { uid: user.id, name: user.fullName, role: user.role },
         decisionText.trim(),
       );
       Alert.alert('Request Sent', 'The submitter has been notified to provide clarification.');

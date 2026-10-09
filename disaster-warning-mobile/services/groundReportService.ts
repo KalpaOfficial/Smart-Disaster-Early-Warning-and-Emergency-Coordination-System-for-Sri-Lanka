@@ -12,7 +12,6 @@ import {
   getDoc,
   addDoc,
   updateDoc,
-  arrayUnion,
   serverTimestamp,
   type DocumentData,
   type QueryDocumentSnapshot,
@@ -29,7 +28,6 @@ import type {
 import type { UserRole } from '@/types/auth';
 
 const COLLECTION = 'groundReports';
-const HAZARD_EVENTS_COLLECTION = 'hazardEvents';
 
 /**
  * Maps a Firestore document snapshot to a GroundReport model.
@@ -120,6 +118,13 @@ export async function submitGroundReport(
     role: UserRole;
   },
 ): Promise<{ id: string; referenceNumber: string }> {
+  // UC02 Phase 7.3: Role-based submission restriction
+  if (submitter.role !== 'citizen' && submitter.role !== 'volunteer') {
+    throw new Error(
+      `Unauthorized: Role '${submitter.role}' cannot submit ground reports. Only citizens and community volunteers can report hazard observations.`,
+    );
+  }
+
   const referenceNumber = generateReferenceNumber();
 
   const docRef = await addDoc(collection(db, COLLECTION), {
@@ -229,6 +234,7 @@ export async function verifyReport(
   officer: {
     uid: string;
     name: string;
+    role?: UserRole;
   },
   payload: {
     hazardEventId?: string | null;
@@ -236,6 +242,13 @@ export async function verifyReport(
     decisionNote?: string;
   },
 ): Promise<void> {
+  // UC02 Phase 7.3: Role-based verification restriction
+  if (officer.role && officer.role !== 'dmc_officer') {
+    throw new Error(
+      `Unauthorized: Role '${officer.role}' cannot verify ground reports. Only DMC Duty Officers have verification authority.`,
+    );
+  }
+
   const reportRef = doc(db, COLLECTION, reportId);
 
   await updateDoc(reportRef, {
@@ -314,9 +327,17 @@ export async function rejectReport(
   officer: {
     uid: string;
     name: string;
+    role?: UserRole;
   },
   reason: string,
 ): Promise<void> {
+  // UC02 Phase 7.3: Role-based rejection restriction
+  if (officer.role && officer.role !== 'dmc_officer') {
+    throw new Error(
+      `Unauthorized: Role '${officer.role}' cannot reject ground reports. Only DMC Duty Officers have verification authority.`,
+    );
+  }
+
   const reportRef = doc(db, COLLECTION, reportId);
 
   await updateDoc(reportRef, {
@@ -338,9 +359,17 @@ export async function requestAdditionalInfo(
   officer: {
     uid: string;
     name: string;
+    role?: UserRole;
   },
   message: string,
 ): Promise<void> {
+  // UC02 Phase 7.3: Role-based info request restriction
+  if (officer.role && officer.role !== 'dmc_officer') {
+    throw new Error(
+      `Unauthorized: Role '${officer.role}' cannot request info on ground reports. Only DMC Duty Officers have verification authority.`,
+    );
+  }
+
   const reportRef = doc(db, COLLECTION, reportId);
 
   await updateDoc(reportRef, {
