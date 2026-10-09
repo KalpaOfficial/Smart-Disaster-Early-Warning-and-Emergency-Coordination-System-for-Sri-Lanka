@@ -62,11 +62,33 @@ export const profileCache = new Map<string, User>();
  * Sign in with email and password strictly via Firebase Auth and Cloud Firestore.
  */
 export async function signIn(credentials: LoginCredentials): Promise<User> {
-  const credential = await signInWithEmailAndPassword(
-    auth,
-    credentials.email.trim(),
-    credentials.password,
-  );
+  let credential;
+  try {
+    credential = await signInWithEmailAndPassword(
+      auth,
+      credentials.email.trim(),
+      credentials.password,
+    );
+  } catch (error: unknown) {
+    const errCode = (error as { code?: string })?.code;
+    // If account has not been registered in Firebase Auth yet, auto-create account for seamless demo access
+    if (
+      (errCode === 'auth/user-not-found' || errCode === 'auth/invalid-credential') &&
+      credentials.password.length >= 6
+    ) {
+      try {
+        credential = await createUserWithEmailAndPassword(
+          auth,
+          credentials.email.trim(),
+          credentials.password,
+        );
+      } catch {
+        throw error;
+      }
+    } else {
+      throw error;
+    }
+  }
 
   const uid = credential.user.uid;
   if (profileCache.has(uid)) {

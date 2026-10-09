@@ -79,8 +79,8 @@ export default function HazardEventDetailsScreen() {
   const handleIssueWarning = () => {
     if (!event) return;
     router.push({
-      pathname: '/(app)/warnings',
-      params: { issueWarningForEventId: event.id },
+      pathname: '/(app)/warnings/compose',
+      params: { eventId: event.id },
     } as never);
   };
 
@@ -93,7 +93,7 @@ export default function HazardEventDetailsScreen() {
             <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
           </TouchableOpacity>
           <View style={styles.navTitleBox}>
-            <Text style={styles.navPill}>UC01 — EVENT TELEMETRY</Text>
+            <Text style={styles.navPill}>EVENT TELEMETRY</Text>
             <Text style={styles.navTitle}>Hazard Event Details</Text>
           </View>
         </View>

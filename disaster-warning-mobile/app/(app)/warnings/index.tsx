@@ -108,7 +108,7 @@ export default function IssueHazardWarningScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   // Form State
-  const [hazardType, setHazardType] = useState<HazardType>('flood');
+  const [hazardType] = useState<HazardType>('flood');
   const [severity, setSeverity] = useState<WarningSeverity>('warning');
   const [targetMode, setTargetMode] = useState<TargetMode>('district');
   const [targetAreas, setTargetAreas] = useState<string[]>(['Ratnapura', 'Kalutara']);
@@ -166,13 +166,13 @@ export default function IssueHazardWarningScreen() {
   const params = useLocalSearchParams<{ issueWarningForEventId?: string }>();
 
   useEffect(() => {
-    if (params.issueWarningForEventId && activeEvents.length > 0) {
-      const targetEvent = activeEvents.find((e) => e.id === params.issueWarningForEventId);
-      if (targetEvent) {
-        handleOpenComposerForEvent(targetEvent);
-      }
+    if (params.issueWarningForEventId) {
+      router.push({
+        pathname: '/(app)/warnings/compose',
+        params: { eventId: params.issueWarningForEventId },
+      } as never);
     }
-  }, [params.issueWarningForEventId, activeEvents]);
+  }, [params.issueWarningForEventId, router]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -204,15 +204,12 @@ export default function IssueHazardWarningScreen() {
     [activeEvents, selectedEventId],
   );
 
-  // Open Composer Modal for selected event
+  // Navigate to Warning Composer screen for selected event
   const handleOpenComposerForEvent = (event: HazardEvent) => {
-    setSelectedEventId(event.id);
-    setHazardType(event.hazardType);
-    setTargetMode('district');
-    setTargetAreas(event.affectedDistricts.length > 0 ? event.affectedDistricts : ['Ratnapura', 'Kalutara']);
-    setHeadline(`RED EVACUATION WARNING: ${event.title}`);
-    setInstructions('Immediate evacuation ordered for residents in low-lying sectors. Move immediately to designated emergency shelters.');
-    setShowModal(true);
+    router.push({
+      pathname: '/(app)/warnings/compose',
+      params: { eventId: event.id },
+    } as never);
   };
 
   // Toggle Target Areas selection
@@ -339,7 +336,7 @@ export default function IssueHazardWarningScreen() {
               <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
             </TouchableOpacity>
             <View style={styles.navTitleBox}>
-              <Text style={styles.navPill}>UC01 — RBAC CONTROL</Text>
+              <Text style={styles.navPill}>ROLE-BASED ACCESS CONTROL</Text>
               <Text style={styles.navTitle}>Issue Hazard Warning</Text>
             </View>
           </View>
@@ -350,7 +347,7 @@ export default function IssueHazardWarningScreen() {
             </View>
             <Text style={styles.rbacTitle}>Access Restricted: DMC Duty Officers Only</Text>
             <Text style={styles.rbacDesc}>
-              UC01 Issue Hazard Warning requires authorized DMC Duty Officer credentials. Your current account role is{' '}
+              Issuing hazard warnings requires authorized DMC Duty Officer credentials. Your current account role is{' '}
               <Text style={{ fontWeight: '900', color: Colors.accent.primary }}>{user?.role ? user.role.toUpperCase() : 'GUEST'}</Text>.
             </Text>
 
@@ -389,7 +386,7 @@ export default function IssueHazardWarningScreen() {
             <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
           </TouchableOpacity>
           <View style={styles.navTitleBox}>
-            <Text style={styles.navPill}>UC01 STEP 1 — OPEN HAZARD EVENTS</Text>
+            <Text style={styles.navPill}>OPEN HAZARD EVENTS</Text>
             <Text style={styles.navTitle}>Hazard Warning Dispatch</Text>
           </View>
         </View>
@@ -557,8 +554,8 @@ export default function IssueHazardWarningScreen() {
         })}
       </ScrollView>
 
-      {/* Warning Composer FormModal (UC01 Steps 4 - 13) */}
-      <FormModal visible={showModal} onClose={() => setShowModal(false)} title="UC01 — Warning Composer">
+      {/* Warning Composer FormModal */}
+      <FormModal visible={showModal} onClose={() => setShowModal(false)} title="Warning Composer">
         <ScrollView style={styles.formScroll} showsVerticalScrollIndicator={false}>
           <View style={styles.prefillBanner}>
             <Ionicons name="information-circle" size={16} color={Colors.accent.primary} />

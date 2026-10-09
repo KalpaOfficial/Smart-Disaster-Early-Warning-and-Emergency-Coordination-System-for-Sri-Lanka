@@ -1,0 +1,126 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==========================================
+    // SECURITY HELPER FUNCTIONS
+    // ==========================================
+
+    /// Checks if the request comes from an authenticated user.
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    /// Checks if the requesting user owns the document by matching UID.
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    /// Retrieves user document from `users` collection.
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    /// Checks if the authenticated user has the 'dmc_officer' role.
+    /// Checks custom auth claims first, then falls back to Firestore user document.
+    function isDmcOfficer() {
+      return isAuthenticated() && (
+        (request.auth.token != null && request.auth.token.role == 'dmc_officer') ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         getUserData().role == 'dmc_officer')
+      );
+    }
+
+    // ==========================================
+    // UC01: HAZARD WARNINGS COLLECTION
+    // ==========================================
+    match /warnings/{warningId} {
+      // All authenticated users (citizens & officers) can read warnings
+      allow read: if isAuthenticated();
+
+      // ONLY authenticated DMC Duty Officers can create hazard warnings
+      allow create: if isDmcOfficer() &&
+        request.resource.data.issuedBy == request.auth.uid;
+
+      // ONLY DMC Officers can update warning status (e.g. dispatching -> delivered/failed)
+      allow update: if isDmcOfficer();
+
+      // ONLY DMC Officers can delete warning documents
+      allow delete: if isDmcOfficer();
+    }
+
+    // ==========================================
+    // UC01: DELIVERY LOGS COLLECTION
+    // ==========================================
+    match /deliveryLogs/{logId} {
+      // ONLY DMC Officers can read delivery audit logs
+      allow read: if isDmcOfficer();
+
+      // ONLY DMC Officers can create or write delivery logs
+      allow create, update, delete: if isDmcOfficer();
+    }
+
+    // ==========================================
+    // HAZARD EVENTS & TIMELINE
+    // ==========================================
+    match /hazardEvents/{eventId} {
+      // All authenticated users can read active/closed hazard events
+      allow read: if isAuthenticated();
+
+      // ONLY DMC Officers can create, update, or append timeline entries to hazard events
+      allow create, update, delete: if isDmcOfficer();
+
+      // Timeline subcollection rules
+      match /timeline/{timelineId} {
+        allow read: if isAuthenticated();
+        allow create, update, delete: if isDmcOfficer();
+      }
+    }
+
+    // ==========================================
+    // UC02: GROUND REPORTS (Citizen Submissions & Officer Verification)
+    // ==========================================
+    match /groundReports/{reportId} {
+      // Citizens can read their own reports; DMC Officers can read all reports
+      allow read: if isAuthenticated() && (
+        resource == null ||
+        resource.data.userId == request.auth.uid ||
+        isDmcOfficer()
+      );
+
+      // Citizens can create reports linked to their own account
+      allow create: if isAuthenticated() &&
+        request.resource.data.userId == request.auth.uid;
+
+      // DMC Officers can verify/update reports; report owner can update drafts
+      allow update: if isAuthenticated() && (
+        isDmcOfficer() ||
+        resource.data.userId == request.auth.uid
+      );
+
+      allow delete: if isDmcOfficer();
+    }
+
+    // ==========================================
+    // USERS COLLECTION (Profiles & Recipient Resolution)
+    // ==========================================
+    match /users/{userId} {
+      // Authenticated users can read user records (required for recipient resolution & role checks)
+      allow read: if isAuthenticated();
+
+      // Users can manage their own profile
+      allow create, update: if isOwner(userId);
+      allow delete: if false; // User deletion restricted
+    }
+
+    // ==========================================
+    // UC04: POST-EVENT STATISTICAL REPORTS
+    // ==========================================
+    match /postEventReports/{reportId} {
+      allow read, write: if isDmcOfficer();
+    }
+    match /reports/{reportId} {
+      allow read, write: if isDmcOfficer();
+    }
+  }
+}
