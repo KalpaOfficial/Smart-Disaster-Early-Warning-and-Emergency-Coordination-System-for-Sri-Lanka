@@ -16,12 +16,14 @@ interface ReportCardProps {
   report: GroundReport;
   onPress: () => void;
   showSubmitter?: boolean;
+  isNew?: boolean;
 }
 
 export function ReportCard({
   report,
   onPress,
   showSubmitter = true,
+  isNew = false,
 }: ReportCardProps) {
   // Format readable time string
   const formattedTime = new Date(report.captureTime).toLocaleDateString('en-GB', {
@@ -31,23 +33,35 @@ export function ReportCard({
     minute: '2-digit',
   });
 
+  const cardGlow = isNew
+    ? report.status === 'verified'
+      ? Colors.report.verified
+      : report.status === 'rejected'
+      ? Colors.report.rejected
+      : Colors.accent.primary
+    : report.status === 'info_requested'
+    ? Colors.info
+    : report.status === 'pending_verification'
+    ? Colors.warning
+    : undefined;
+
   return (
     <Card
       onPress={onPress}
-      style={styles.card}
-      glowColor={
-        report.status === 'info_requested'
-          ? Colors.info
-          : report.status === 'pending_verification'
-          ? Colors.warning
-          : undefined
-      }
+      style={isNew ? [styles.card, styles.cardHighlight] : styles.card}
+      glowColor={cardGlow}
     >
-      {/* Header Row: Reference Number + Status Badge */}
+      {/* Header Row: Reference Number + NEW Badge + Status Badge */}
       <View style={styles.headerRow}>
         <View style={styles.refContainer}>
           <Ionicons name="document-text-outline" size={14} color={Colors.accent.primary} />
           <Text style={styles.refNumber}>{report.referenceNumber}</Text>
+          {isNew && (
+            <View style={styles.newBadge}>
+              <View style={styles.newBadgeDot} />
+              <Text style={styles.newBadgeText}>NEW</Text>
+            </View>
+          )}
         </View>
         <ReportStatusBadge status={report.status} size="sm" />
       </View>
@@ -88,6 +102,27 @@ export function ReportCard({
           />
         ) : null}
       </View>
+
+      {/* Decision / Feedback Feedback Banners */}
+      {report.status === 'rejected' && report.verificationDecision && (
+        <View style={styles.rejectionSnippetBox}>
+          <Ionicons name="close-circle-outline" size={14} color={Colors.report.rejected} />
+          <Text style={styles.rejectionSnippetText} numberOfLines={1}>
+            Officer Reason: {report.verificationDecision}
+          </Text>
+        </View>
+      )}
+
+      {report.status === 'verified' && (report.hazardEventTitle || report.verificationDecision) && (
+        <View style={styles.verifiedSnippetBox}>
+          <Ionicons name="shield-checkmark-outline" size={14} color={Colors.report.verified} />
+          <Text style={styles.verifiedSnippetText} numberOfLines={1}>
+            {report.hazardEventTitle
+              ? `Linked to Event: ${report.hazardEventTitle}`
+              : `Review Note: ${report.verificationDecision}`}
+          </Text>
+        </View>
+      )}
 
       {/* Info Requested Notice (if applicable) */}
       {report.status === 'info_requested' && report.infoRequestedMessage && (
@@ -250,5 +285,68 @@ const styles = StyleSheet.create({
     fontSize: FontSize.micro,
     color: Colors.text.secondary,
     fontWeight: '600',
+  },
+  cardHighlight: {
+    borderColor: 'rgba(56, 189, 248, 0.4)',
+    borderWidth: 1.5,
+  },
+  newBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(56, 189, 248, 0.16)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.4)',
+  },
+  newBadgeDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: Colors.accent.primary,
+  },
+  newBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: Colors.accent.primary,
+    letterSpacing: 0.5,
+  },
+  rejectionSnippetBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.25)',
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    marginBottom: Spacing.sm,
+  },
+  rejectionSnippetText: {
+    fontSize: FontSize.micro,
+    color: Colors.report.rejected,
+    fontWeight: '600',
+    flex: 1,
+  },
+  verifiedSnippetBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.25)',
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    marginBottom: Spacing.sm,
+  },
+  verifiedSnippetText: {
+    fontSize: FontSize.micro,
+    color: Colors.report.verified,
+    fontWeight: '600',
+    flex: 1,
   },
 });

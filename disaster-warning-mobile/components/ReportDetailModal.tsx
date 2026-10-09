@@ -236,25 +236,62 @@ export function ReportDetailModal({
               </View>
             </View>
 
-            {/* Officer Decision Display (if reviewed) */}
-            {report.verifiedBy && (
-              <View style={styles.decisionCard}>
+            {/* Officer Decision Display — Verified Assessment */}
+            {report.status === 'verified' && (
+              <View style={styles.verifiedDecisionCard}>
                 <View style={styles.decisionHeader}>
-                  <Ionicons
-                    name={report.status === 'verified' ? 'shield-checkmark' : 'close-circle'}
-                    size={18}
-                    color={report.status === 'verified' ? Colors.success : Colors.danger}
-                  />
-                  <Text style={styles.decisionTitle}>
-                    {report.status === 'verified' ? 'Verified by DMC' : 'Rejected with Rationale'}
+                  <Ionicons name="shield-checkmark" size={18} color={Colors.status.success} />
+                  <Text style={[styles.decisionTitle, { color: Colors.status.success }]}>
+                    Verified Assessment
                   </Text>
                 </View>
                 <Text style={styles.decisionText}>
-                  {report.verificationDecision || 'Officer reviewed and logged record.'}
+                  {report.verificationDecision || 'This observation was officially verified by the DMC Duty Officer.'}
                 </Text>
-                <Text style={styles.decisionOfficer}>
-                  Reviewed by: {report.verifiedByName || 'DMC Duty Officer'}
+                {report.hazardEventTitle && (
+                  <View style={styles.linkedEventBadge}>
+                    <Ionicons name="link-outline" size={13} color={Colors.accent.primary} />
+                    <Text style={styles.linkedEventText}>
+                      Linked Hazard: <Text style={styles.linkedEventHighlight}>{report.hazardEventTitle}</Text>
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.decisionFooterRow}>
+                  <Text style={styles.decisionOfficer}>
+                    Verified by: {report.verifiedByName || 'DMC Duty Officer'}
+                  </Text>
+                  {report.verificationTimestamp && (
+                    <Text style={styles.decisionTimestamp}>
+                      {new Date(report.verificationTimestamp).toLocaleDateString()}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* Officer Decision Display — Rejection with Rationale */}
+            {report.status === 'rejected' && (
+              <View style={styles.rejectedDecisionCard}>
+                <View style={styles.decisionHeader}>
+                  <Ionicons name="close-circle" size={18} color={Colors.status.danger} />
+                  <Text style={[styles.decisionTitle, { color: Colors.status.danger }]}>
+                    Report Rejected
+                  </Text>
+                </View>
+                <Text style={styles.rejectionReasonLabel}>Official Rejection Reason:</Text>
+                <Text style={styles.rejectionReasonText}>
+                  {report.verificationDecision || 'This observation was reviewed and marked as unverified.'}
                 </Text>
+                <View style={styles.decisionFooterRow}>
+                  <Text style={styles.decisionOfficer}>
+                    Reviewed by: {report.verifiedByName || 'DMC Duty Officer'}
+                  </Text>
+                  {report.verificationTimestamp && (
+                    <Text style={styles.decisionTimestamp}>
+                      {new Date(report.verificationTimestamp).toLocaleDateString()}
+                    </Text>
+                  )}
+                </View>
               </View>
             )}
 
@@ -558,7 +595,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.text.tertiary,
   },
-  decisionCard: {
+  verifiedDecisionCard: {
     backgroundColor: 'rgba(16, 185, 129, 0.1)',
     borderRadius: BorderRadius.md,
     borderWidth: 1,
@@ -566,11 +603,19 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     marginBottom: Spacing.lg,
   },
+  rejectedDecisionCard: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
   decisionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.xs + 2,
-    marginBottom: 4,
+    marginBottom: 6,
   },
   decisionTitle: {
     fontSize: FontSize.sm,
@@ -580,12 +625,58 @@ const styles = StyleSheet.create({
   decisionText: {
     fontSize: FontSize.xs,
     color: Colors.text.secondary,
-    marginBottom: Spacing.xs,
+    lineHeight: 18,
+    marginBottom: Spacing.xs + 2,
+  },
+  rejectionReasonLabel: {
+    fontSize: FontSize.micro,
+    fontWeight: '700',
+    color: Colors.status.danger,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  rejectionReasonText: {
+    fontSize: FontSize.xs,
+    color: Colors.text.primary,
+    lineHeight: 18,
+    marginBottom: Spacing.xs + 2,
+  },
+  linkedEventBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.xs,
+    alignSelf: 'flex-start',
+    marginBottom: Spacing.xs + 2,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.25)',
+  },
+  linkedEventText: {
+    fontSize: FontSize.micro,
+    color: Colors.text.secondary,
+  },
+  linkedEventHighlight: {
+    color: Colors.accent.primary,
+    fontWeight: '700',
+  },
+  decisionFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
   },
   decisionOfficer: {
     fontSize: FontSize.micro,
     color: Colors.text.tertiary,
     fontStyle: 'italic',
+  },
+  decisionTimestamp: {
+    fontSize: FontSize.micro,
+    color: Colors.text.tertiary,
   },
   replySection: {
     backgroundColor: '#090F1C',

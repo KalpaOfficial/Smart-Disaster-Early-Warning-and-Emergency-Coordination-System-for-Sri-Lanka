@@ -37,6 +37,7 @@ import {
   submitAdditionalInfo,
 } from '@/services/groundReportService';
 import { getActiveEvents } from '@/services/hazardEventService';
+import { markNotificationAsRead } from '@/services/reportNotificationService';
 import type { GroundReport } from '@/types/groundReport';
 import type { HazardEvent } from '@/types/resources';
 
@@ -84,6 +85,10 @@ export default function ReportDetailScreen() {
     try {
       const data = await getReportById(reportId);
       setReport(data);
+
+      if (data && data.status !== 'pending_verification') {
+        markNotificationAsRead(data.id, data.status).catch(() => {});
+      }
 
       if (isOfficer || user?.role === 'dmc_officer') {
         const events = await getActiveEvents();

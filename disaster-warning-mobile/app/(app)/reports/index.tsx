@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenContainer } from '@/components/ScreenContainer';
 import { ReportCard } from '@/components/ReportCard';
@@ -61,6 +61,7 @@ export default function ReportListScreen() {
 
   const { isOffline } = useNetworkStatus();
   const {
+    notifications,
     activeNotification,
     dismissNotification,
     refreshNotifications,
@@ -126,6 +127,15 @@ export default function ReportListScreen() {
     return () => { mounted = false; };
   }, [fetchReports, fetchOfflineCount, fetchActiveEvents]);
 
+  // Re-poll for updates and unread status notifications when screen gains focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchReports();
+      fetchOfflineCount();
+      refreshNotifications();
+    }, [fetchReports, fetchOfflineCount, refreshNotifications]),
+  );
+
   // Subscribe to background synchronization events
   useEffect(() => {
     const unsubscribe = subscribeToSyncProgress((event) => {
@@ -149,6 +159,11 @@ export default function ReportListScreen() {
   }, [fetchReports, fetchOfflineCount, fetchActiveEvents, refreshNotifications]);
 
   const handleReportPress = (report: GroundReport) => {
+    // If report has an unacknowledged notification, dismiss it as seen
+    const matchingNotif = notifications.find((n) => n.reportId === report.id);
+    if (matchingNotif) {
+      dismissNotification(matchingNotif);
+    }
     setSelectedReport(report);
     setModalVisible(true);
   };
@@ -185,13 +200,17 @@ export default function ReportListScreen() {
     await fetchReports();
   };
 
-  const renderReportItem = ({ item }: { item: GroundReport }) => (
-    <ReportCard
-      report={item}
-      onPress={() => handleReportPress(item)}
-      showSubmitter={isOfficer}
-    />
-  );
+  const renderReportItem = ({ item }: { item: GroundReport }) => {
+    const isNew = !isOfficer && notifications.some((n) => n.reportId === item.id);
+    return (
+      <ReportCard
+        report={item}
+        onPress={() => handleReportPress(item)}
+        showSubmitter={isOfficer}
+        isNew={isNew}
+      />
+    );
+  };
 
   const headerTitle = isOfficer ? 'Verification Queue' : 'My Ground Reports';
   const headerSubtitle = isOfficer

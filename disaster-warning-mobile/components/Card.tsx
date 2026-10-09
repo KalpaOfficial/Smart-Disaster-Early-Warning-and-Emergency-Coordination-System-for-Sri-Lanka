@@ -7,12 +7,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   type ViewStyle,
+  type StyleProp,
 } from 'react-native';
 import { BorderRadius, Spacing } from '@/constants/colors';
 
 interface CardProps {
   children: React.ReactNode;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   onPress?: () => void;
   glowColor?: string;
   noPadding?: boolean;
