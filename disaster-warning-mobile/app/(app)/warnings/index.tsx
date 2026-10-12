@@ -1,3 +1,4 @@
+import { AppAlert } from '@/utils/appNotice';
 /**
  * UC01 – Step 1 UI: Open Hazard Events Control Center
  * Displays open/active hazard events from Firestore for authorized DMC Duty Officers.
@@ -11,24 +12,29 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
-  Platform,
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
 import { ScreenContainer } from '@/components/ScreenContainer';
-import { Card } from '@/components/Card';
-import { Button } from '@/components/Button';
+import {
+  OfficerCard as Card,
+  OfficerButton as Button,
+  OfficerHero,
+  officerScreenStyle,
+  officerShellStyle,
+} from '@/components/OfficerUi';
 import { Input } from '@/components/Input';
 import { Select } from '@/components/Select';
 import { FormModal } from '@/components/FormModal';
 import { EmptyState } from '@/components/EmptyState';
 import { MobileNavBar } from '@/components/MobileNavBar';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/colors';
+import { CommunityWarnings } from '@/components/CommunityWarnings';
+import { isCommunityRole } from '@/constants/navigation';
+import { Spacing, BorderRadius } from '@/constants/colors';
+import { OfficerColors as Colors, OfficerFontSize as FontSize } from '@/components/OfficerUi';
 import { SRI_LANKA_RIVER_BASINS } from '@/constants/riverBasins';
 import {
   getAllWarnings,
@@ -84,6 +90,11 @@ const SEVERITY_OPTIONS = [
 
 export default function IssueHazardWarningScreen() {
   const { state } = useAuth();
+  return isCommunityRole(state.user?.role) ? <CommunityWarnings /> : <OfficerWarningsScreen />;
+}
+
+function OfficerWarningsScreen() {
+  const { state } = useAuth();
   const router = useRouter();
   const user = state.user;
 
@@ -93,7 +104,9 @@ export default function IssueHazardWarningScreen() {
   // Firestore Data State
   const [activeEvents, setActiveEvents] = useState<HazardEvent[]>([]);
   const [warnings, setWarnings] = useState<HazardWarning[]>([]);
-  const [groundReportsMap, setGroundReportsMap] = useState<Record<string, VerifiedGroundReportStub[]>>({});
+  const [groundReportsMap, setGroundReportsMap] = useState<
+    Record<string, VerifiedGroundReportStub[]>
+  >({});
 
   // Operational Screen States (Loading, Refreshing, Error)
   const [loading, setLoading] = useState(true);
@@ -134,10 +147,7 @@ export default function IssueHazardWarningScreen() {
   const fetchOpenEventsAndTelemetry = useCallback(async () => {
     setError(null);
     try {
-      const [eventsList, warnList] = await Promise.all([
-        getActiveEvents(),
-        getAllWarnings(),
-      ]);
+      const [eventsList, warnList] = await Promise.all([getActiveEvents(), getAllWarnings()]);
 
       setActiveEvents(eventsList);
       setWarnings(warnList);
@@ -145,10 +155,10 @@ export default function IssueHazardWarningScreen() {
       // Fetch ground reports count & preview for each active event
       const reportsMap: Record<string, VerifiedGroundReportStub[]> = {};
       await Promise.all(
-        eventsList.map(async (evt) => {
+        eventsList.map(async evt => {
           const reports = await getGroundReportsForEvent(evt.id);
           reportsMap[evt.id] = reports;
-        }),
+        })
       );
       setGroundReportsMap(reportsMap);
 
@@ -164,9 +174,11 @@ export default function IssueHazardWarningScreen() {
   }, [selectedEventId]);
 
   // Trigger initial fetch of open hazard events and telemetry on component mount
-  useEffect(() => {
-    fetchOpenEventsAndTelemetry();
-  }, [fetchOpenEventsAndTelemetry]);
+  useFocusEffect(
+    useCallback(() => {
+      void fetchOpenEventsAndTelemetry();
+    }, [fetchOpenEventsAndTelemetry])
+  );
 
   const params = useLocalSearchParams<{ issueWarningForEventId?: string }>();
 
@@ -191,7 +203,7 @@ export default function IssueHazardWarningScreen() {
     let isCurrent = true;
     setResolvingRecipients(true);
 
-    resolveRecipients(targetMode, targetAreas).then((res) => {
+    resolveRecipients(targetMode, targetAreas).then(res => {
       if (isCurrent) {
         setResolvedDistricts(res.resolvedDistricts);
         setRecipientCount(res.recipientCount);
@@ -205,8 +217,8 @@ export default function IssueHazardWarningScreen() {
   }, [targetMode, targetAreas, showModal]);
 
   const selectedEvent = useMemo(
-    () => activeEvents.find((e) => e.id === selectedEventId) || activeEvents[0],
-    [activeEvents, selectedEventId],
+    () => activeEvents.find(e => e.id === selectedEventId) || activeEvents[0],
+    [activeEvents, selectedEventId]
   );
 
   // Navigate to Event Details screen (Screen 2 — Review Evidence & Summary)
@@ -227,10 +239,10 @@ export default function IssueHazardWarningScreen() {
 
   // Toggle Target Areas selection
   const toggleTargetArea = (area: string) => {
-    setTargetAreas((prev) => {
+    setTargetAreas(prev => {
       const exists = prev.includes(area);
       if (exists) {
-        return prev.filter((a) => a !== area);
+        return prev.filter(a => a !== area);
       } else {
         return [...prev, area];
       }
@@ -239,14 +251,17 @@ export default function IssueHazardWarningScreen() {
 
   // Toggle Delivery Channel selection
   const toggleDeliveryChannel = (channel: DeliveryChannel) => {
-    setDeliveryChannels((prev) => {
+    setDeliveryChannels(prev => {
       const exists = prev.includes(channel);
       if (exists) {
         if (prev.length === 1) {
-          Alert.alert('Delivery Channel Required', 'At least one delivery channel must be selected.');
+          AppAlert.alert(
+            'Delivery Channel Required',
+            'At least one delivery channel must be selected.'
+          );
           return prev;
         }
-        return prev.filter((c) => c !== channel);
+        return prev.filter(c => c !== channel);
       } else {
         return [...prev, channel];
       }
@@ -256,23 +271,23 @@ export default function IssueHazardWarningScreen() {
   // Submit Warning Pipeline (UC01 Steps 13 - 19)
   const handleSubmitWarning = async (forceFailure?: DeliveryChannel) => {
     if (!headline.trim()) {
-      Alert.alert('Validation Error', 'Please enter a warning headline.');
+      AppAlert.alert('Validation Error', 'Please enter a warning headline.');
       return;
     }
     if (!instructions.trim()) {
-      Alert.alert('Validation Error', 'Please enter emergency instructions.');
+      AppAlert.alert('Validation Error', 'Please enter emergency instructions.');
       return;
     }
     if (deliveryChannels.length === 0) {
-      Alert.alert('Validation Error', 'Please select at least one delivery channel.');
+      AppAlert.alert('Validation Error', 'Please select at least one delivery channel.');
       return;
     }
 
     // Exception Flow 1: No recipients matched
     if (recipientCount <= 0 || targetAreas.length === 0) {
-      Alert.alert(
+      AppAlert.alert(
         'No Recipients Matched',
-        'No registered recipients were matched for the selected target areas. Please select valid target districts or river basins.',
+        'No registered recipients were matched for the selected target areas. Please select valid target districts or river basins.'
       );
       return;
     }
@@ -280,7 +295,9 @@ export default function IssueHazardWarningScreen() {
     setSubmitting(true);
     try {
       const issuerUid = user?.id || 'test-user-dmc-officer';
-      const issuerName = user?.fullName ? `${user.fullName} (DMC Duty Officer)` : 'DMC Command Centre';
+      const issuerName = user?.fullName
+        ? `${user.fullName} (DMC Duty Officer)`
+        : 'DMC Command Centre';
 
       const result = await createWarningWithDispatch(
         {
@@ -300,7 +317,7 @@ export default function IssueHazardWarningScreen() {
         },
         issuerUid,
         issuerName,
-        forceFailure,
+        forceFailure
       );
 
       setShowModal(false);
@@ -315,8 +332,7 @@ export default function IssueHazardWarningScreen() {
       fetchOpenEventsAndTelemetry();
     } catch (err) {
       const msg = (err as Error).message || 'Warning submission failed.';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Submission Error', msg);
+      AppAlert.alert('Submission Error', msg);
     } finally {
       setSubmitting(false);
     }
@@ -342,17 +358,15 @@ export default function IssueHazardWarningScreen() {
   // Authorization Exception: Access Restricted to DMC Officers
   if (!isDmcOfficer && !loading) {
     return (
-      <ScreenContainer>
+      <ScreenContainer style={officerScreenStyle} contentStyle={officerShellStyle}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          <View style={styles.navHeader}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-              <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
-            </TouchableOpacity>
-            <View style={styles.navTitleBox}>
-              <Text style={styles.navPill}>ROLE-BASED ACCESS CONTROL</Text>
-              <Text style={styles.navTitle}>Issue Hazard Warning</Text>
-            </View>
-          </View>
+          <OfficerHero
+            title="Hazard warnings"
+            description="Review active events and issue clear instructions to affected communities."
+            caption="DMC Officer"
+            icon="notifications-outline"
+            onBack={() => router.back()}
+          />
 
           <Card style={styles.rbacCard}>
             <View style={styles.rbacIconBox}>
@@ -360,16 +374,13 @@ export default function IssueHazardWarningScreen() {
             </View>
             <Text style={styles.rbacTitle}>Access Restricted: DMC Duty Officers Only</Text>
             <Text style={styles.rbacDesc}>
-              Issuing hazard warnings requires authorized DMC Duty Officer credentials. Your current account role is{' '}
-              <Text style={{ fontWeight: '900', color: Colors.accent.primary }}>{user?.role ? user.role.toUpperCase() : 'GUEST'}</Text>.
-            </Text>
-
-            <View style={styles.rbacHintBox}>
-              <Ionicons name="information-circle-outline" size={16} color={Colors.text.secondary} />
-              <Text style={styles.rbacHintText}>
-                To test DMC Officer features, sign in as <Text style={{ color: '#FFF', fontWeight: '800' }}>officer@dmc.gov.lk</Text> or update your user profile role in Cloud Firestore.
+              Issuing hazard warnings requires authorized DMC Duty Officer credentials. Your current
+              account role is{' '}
+              <Text style={{ fontWeight: '900', color: Colors.accent.primary }}>
+                {user?.role ? user.role.toUpperCase() : 'GUEST'}
               </Text>
-            </View>
+              .
+            </Text>
 
             <Button
               title="Return to Dashboard"
@@ -379,55 +390,42 @@ export default function IssueHazardWarningScreen() {
             />
           </Card>
         </ScrollView>
-        <MobileNavBar />
+        <MobileNavBar appearance="light" />
       </ScreenContainer>
     );
   }
 
   return (
-    <ScreenContainer>
+    <ScreenContainer style={officerScreenStyle} contentStyle={officerShellStyle}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent.primary} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors.accent.primary}
+          />
         }
       >
         {/* Navigation Header */}
-        <View style={styles.navHeader}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-            <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
-          </TouchableOpacity>
-          <View style={styles.navTitleBox}>
-            <Text style={styles.navPill}>OPEN HAZARD EVENTS</Text>
-            <Text style={styles.navTitle}>Hazard Warning Dispatch</Text>
-          </View>
-        </View>
-
-        {/* Header Hero Banner */}
-        <LinearGradient
-          colors={['#1E1B4B', '#0F172A']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.heroBanner}
-        >
-          <View style={styles.heroHeaderRow}>
-            <View style={styles.beaconPill}>
-              <View style={styles.beaconDot} />
-              <Text style={styles.beaconText}>DMC OFFICER COMMAND • AUTHORIZED</Text>
-            </View>
-            <Text style={styles.heroRoleTag}>FIRESTORE LIVE SYNC</Text>
-          </View>
-
-          <Text style={styles.heroTitle}>Open Hazard Events Control Center</Text>
-          <Text style={styles.heroDesc}>
-            Inspect open disaster hazard events, verified ground reports, and affected river basins to issue location-specific early warnings.
-          </Text>
-        </LinearGradient>
+        <OfficerHero
+          title="Hazard warnings"
+          description="Review active events and issue clear instructions to affected communities."
+          caption="DMC Officer"
+          icon="notifications-outline"
+          onBack={() => router.back()}
+        />
+        <Button
+          title="Manage hazard events"
+          variant="secondary"
+          onPress={() => router.push('/(app)/warnings/events' as never)}
+          style={{ marginBottom: 20 }}
+        />
 
         {/* Section Header */}
         <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>ACTIVE OPEN HAZARD EVENTS FOR WARNING ISSUANCE</Text>
+          <Text style={styles.sectionTitle}>Active hazard events</Text>
           {loading && <ActivityIndicator size="small" color={Colors.accent.primary} />}
         </View>
 
@@ -435,14 +433,14 @@ export default function IssueHazardWarningScreen() {
         {loading ? (
           <Card style={styles.stateCard}>
             <ActivityIndicator size="large" color={Colors.accent.primary} />
-            <Text style={styles.stateTitle}>Querying Active Hazard Events...</Text>
-            <Text style={styles.stateDesc}>Fetching live telemetry from Cloud Firestore `hazardEvents` collection.</Text>
+            <Text style={styles.stateTitle}>Loading active events...</Text>
+            <Text style={styles.stateDesc}>Checking the latest event information.</Text>
           </Card>
         ) : error ? (
           /* Error State */
           <Card style={styles.errorCard}>
             <Ionicons name="cloud-offline" size={36} color={Colors.danger} />
-            <Text style={styles.errorTitle}>Firestore Connection Error</Text>
+            <Text style={styles.errorTitle}>Unable to load events</Text>
             <Text style={styles.errorDesc}>{error}</Text>
             <Button
               title="Retry Connection"
@@ -454,7 +452,7 @@ export default function IssueHazardWarningScreen() {
           </Card>
         ) : activeEvents.length > 0 ? (
           /* Open Hazard Events List */
-          activeEvents.map((event) => {
+          activeEvents.map(event => {
             const reports = groundReportsMap[event.id] || [];
 
             return (
@@ -466,7 +464,9 @@ export default function IssueHazardWarningScreen() {
                   </View>
 
                   <View style={styles.warningLevelBadge}>
-                    <Text style={styles.warningLevelText}>{event.warningLevel || 'LEVEL 4 ALERT'}</Text>
+                    <Text style={styles.warningLevelText}>
+                      {event.warningLevel || 'LEVEL 4 ALERT'}
+                    </Text>
                   </View>
 
                   <View style={styles.statusChip}>
@@ -481,9 +481,9 @@ export default function IssueHazardWarningScreen() {
 
                 {/* Affected Areas & River Basins */}
                 <View style={styles.areaSection}>
-                  <Text style={styles.areaLabel}>AFFECTED DISTRICTS:</Text>
+                  <Text style={styles.areaLabel}>Affected districts</Text>
                   <View style={styles.chipsWrap}>
-                    {event.affectedDistricts.map((d) => (
+                    {event.affectedDistricts.map(d => (
                       <View key={d} style={styles.districtChip}>
                         <Ionicons name="location-sharp" size={11} color={Colors.accent.primary} />
                         <Text style={styles.districtChipText}>{d}</Text>
@@ -494,11 +494,11 @@ export default function IssueHazardWarningScreen() {
 
                 {event.affectedRiverBasins && event.affectedRiverBasins.length > 0 ? (
                   <View style={styles.areaSection}>
-                    <Text style={styles.areaLabel}>AFFECTED RIVER BASINS:</Text>
+                    <Text style={styles.areaLabel}>Affected river basins</Text>
                     <View style={styles.chipsWrap}>
-                      {event.affectedRiverBasins.map((b) => (
+                      {event.affectedRiverBasins.map(b => (
                         <View key={b} style={styles.basinChip}>
-                          <Ionicons name="water" size={11} color="#38BDF8" />
+                          <Ionicons name="water" size={11} color="#0066FF" />
                           <Text style={styles.basinChipText}>{b}</Text>
                         </View>
                       ))}
@@ -511,11 +511,11 @@ export default function IssueHazardWarningScreen() {
                   <View style={styles.groundReportsHeader}>
                     <Ionicons name="shield-checkmark" size={14} color={Colors.success} />
                     <Text style={styles.groundReportsHeaderText}>
-                      VERIFIED GROUND REPORTS ({reports.length})
+                      Verified ground reports ({reports.length})
                     </Text>
                   </View>
 
-                  {reports.map((report) => (
+                  {reports.map(report => (
                     <View key={report.id} style={styles.reportRow}>
                       <Text style={styles.reportLocation}>📍 {report.locationName}:</Text>
                       <Text style={styles.reportDesc}>{report.description}</Text>
@@ -536,7 +536,9 @@ export default function IssueHazardWarningScreen() {
                   <Button
                     title="Issue Warning"
                     variant="secondary"
-                    icon={<Ionicons name="megaphone-outline" size={16} color={Colors.accent.primary} />}
+                    icon={
+                      <Ionicons name="megaphone-outline" size={16} color={Colors.accent.primary} />
+                    }
                     onPress={() => handleOpenComposerForEvent(event)}
                     style={styles.quickIssueBtn}
                   />
@@ -547,16 +549,17 @@ export default function IssueHazardWarningScreen() {
         ) : (
           /* Empty State */
           <EmptyState
+            appearance="light"
             iconName="cloud-done-outline"
             title="No Open Hazard Events"
-            message="There are currently no active/open hazard events in Cloud Firestore. All monitoring stations are within baseline thresholds."
+            message="No active hazard events are listed. Check again for updated event information."
           />
         )}
 
         {/* Existing Issued Warnings Timeline Header */}
-        <Text style={styles.sectionTitle}>RECENTLY ISSUED WARNING BROADCASTS ({warnings.length})</Text>
+        <Text style={styles.sectionTitle}>Recent warnings ({warnings.length})</Text>
 
-        {warnings.map((w) => {
+        {warnings.map(w => {
           const st = getStatusBadge(w.status);
           return (
             <Card key={w.id} style={styles.warningHistoryCard}>
@@ -566,57 +569,103 @@ export default function IssueHazardWarningScreen() {
               </View>
 
               <Text style={styles.targetInfoText}>
-                Target: {w.targetMode.toUpperCase()} ({w.targetAreas.join(', ')}) • {w.recipientCount.toLocaleString()} Recipients
+                Target: {w.targetMode.toUpperCase()} ({w.targetAreas.join(', ')}) •{' '}
+                {w.recipientCount.toLocaleString()} Recipients
               </Text>
               <Text style={styles.instructionPreview} numberOfLines={2}>
                 {w.instructions}
               </Text>
+              <Button
+                title="View delivery details"
+                variant="secondary"
+                onPress={() =>
+                  router.push({
+                    pathname: '/(app)/warnings/summary',
+                    params: { warningId: w.id, eventId: w.eventId },
+                  } as never)
+                }
+                style={{ marginTop: 12 }}
+              />
             </Card>
           );
         })}
       </ScrollView>
 
       {/* Warning Composer FormModal */}
-      <FormModal visible={showModal} onClose={() => setShowModal(false)} title="Warning Composer">
+      <FormModal
+        appearance="light"
+        visible={showModal}
+        onClose={() => setShowModal(false)}
+        title="Warning Composer"
+      >
         <ScrollView style={styles.formScroll} showsVerticalScrollIndicator={false}>
           <View style={styles.prefillBanner}>
             <Ionicons name="information-circle" size={16} color={Colors.accent.primary} />
             <Text style={styles.prefillBannerText}>
-              PREFILLED HAZARD TYPE: <Text style={{ fontWeight: '900', color: '#FFF' }}>{hazardType.toUpperCase()}</Text> (Event: {selectedEvent?.title})
+              PREFILLED HAZARD TYPE:{' '}
+              <Text style={{ fontWeight: '900', color: Colors.text.primary }}>
+                {hazardType.toUpperCase()}
+              </Text>{' '}
+              (Event: {selectedEvent?.title})
             </Text>
           </View>
 
           <Select
+            appearance="light"
             label="Step 5: Warning Severity Level *"
             options={SEVERITY_OPTIONS}
             value={severity}
-            onSelect={(val) => setSeverity(val as WarningSeverity)}
+            onSelect={val => setSeverity(val as WarningSeverity)}
           />
 
           <Text style={styles.fieldLabel}>Step 6: Target Mode *</Text>
           <View style={styles.targetModeRow}>
             <TouchableOpacity
-              style={[styles.targetModeBtn, targetMode === 'district' && styles.targetModeBtnActive]}
+              style={[
+                styles.targetModeBtn,
+                targetMode === 'district' && styles.targetModeBtnActive,
+              ]}
               onPress={() => {
                 setTargetMode('district');
                 setTargetAreas(['Ratnapura', 'Kalutara']);
               }}
             >
-              <Ionicons name="business-outline" size={16} color={targetMode === 'district' ? Colors.accent.primary : Colors.text.tertiary} />
-              <Text style={[styles.targetModeText, targetMode === 'district' && styles.targetModeTextActive]}>
+              <Ionicons
+                name="business-outline"
+                size={16}
+                color={targetMode === 'district' ? Colors.accent.primary : Colors.text.tertiary}
+              />
+              <Text
+                style={[
+                  styles.targetModeText,
+                  targetMode === 'district' && styles.targetModeTextActive,
+                ]}
+              >
                 District Target
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.targetModeBtn, targetMode === 'river_basin' && styles.targetModeBtnActive]}
+              style={[
+                styles.targetModeBtn,
+                targetMode === 'river_basin' && styles.targetModeBtnActive,
+              ]}
               onPress={() => {
                 setTargetMode('river_basin');
                 setTargetAreas(['Kalu River Basin']);
               }}
             >
-              <Ionicons name="water-outline" size={16} color={targetMode === 'river_basin' ? Colors.accent.primary : Colors.text.tertiary} />
-              <Text style={[styles.targetModeText, targetMode === 'river_basin' && styles.targetModeTextActive]}>
+              <Ionicons
+                name="water-outline"
+                size={16}
+                color={targetMode === 'river_basin' ? Colors.accent.primary : Colors.text.tertiary}
+              />
+              <Text
+                style={[
+                  styles.targetModeText,
+                  targetMode === 'river_basin' && styles.targetModeTextActive,
+                ]}
+              >
                 River Basin Target
               </Text>
             </TouchableOpacity>
@@ -626,7 +675,10 @@ export default function IssueHazardWarningScreen() {
             Step 7: Select Target {targetMode === 'district' ? 'Districts' : 'River Basins'} *
           </Text>
           <View style={styles.districtsGrid}>
-            {(targetMode === 'district' ? SRI_LANKA_DISTRICTS : Object.keys(SRI_LANKA_RIVER_BASINS)).map((area) => {
+            {(targetMode === 'district'
+              ? SRI_LANKA_DISTRICTS
+              : Object.keys(SRI_LANKA_RIVER_BASINS)
+            ).map(area => {
               const selected = targetAreas.includes(area);
               return (
                 <TouchableOpacity
@@ -639,7 +691,9 @@ export default function IssueHazardWarningScreen() {
                     size={14}
                     color={selected ? Colors.accent.primary : Colors.text.tertiary}
                   />
-                  <Text style={[styles.districtPickText, selected && styles.districtPickTextSelected]}>
+                  <Text
+                    style={[styles.districtPickText, selected && styles.districtPickTextSelected]}
+                  >
                     {area}
                   </Text>
                 </TouchableOpacity>
@@ -650,15 +704,27 @@ export default function IssueHazardWarningScreen() {
           <View style={styles.recipientBadgeBox}>
             <View style={styles.recipientBadgeHeader}>
               <Ionicons name="people-outline" size={16} color={Colors.accent.primary} />
-              <Text style={styles.recipientBadgeTitle}>STEP 8 &amp; 9: RECIPIENT RESOLUTION MATRIX</Text>
+              <Text style={styles.recipientBadgeTitle}>
+                STEP 8 &amp; 9: RECIPIENT RESOLUTION MATRIX
+              </Text>
             </View>
             {resolvingRecipients ? (
-              <ActivityIndicator size="small" color={Colors.accent.primary} style={{ marginVertical: 4 }} />
+              <ActivityIndicator
+                size="small"
+                color={Colors.accent.primary}
+                style={{ marginVertical: 4 }}
+              />
             ) : (
               <>
                 <Text style={styles.recipientCountText}>
                   👥 Estimated Recipients:{' '}
-                  <Text style={{ fontSize: FontSize.lg, fontWeight: '900', color: Colors.accent.primary }}>
+                  <Text
+                    style={{
+                      fontSize: FontSize.lg,
+                      fontWeight: '900',
+                      color: Colors.accent.primary,
+                    }}
+                  >
                     {recipientCount.toLocaleString()}
                   </Text>{' '}
                   registered users
@@ -680,6 +746,7 @@ export default function IssueHazardWarningScreen() {
           </View>
 
           <Input
+            appearance="light"
             label="Step 10: Warning Headline *"
             placeholder="e.g. RED EVACUATION ALERT: Kalu River Basin Critical Level"
             value={headline}
@@ -688,6 +755,7 @@ export default function IssueHazardWarningScreen() {
           />
 
           <Input
+            appearance="light"
             label="Step 11: Emergency Safety Instructions *"
             placeholder="e.g. Immediate evacuation required for low-lying areas. Move immediately to Bodhiraja School Emergency Shelter..."
             value={instructions}
@@ -703,7 +771,7 @@ export default function IssueHazardWarningScreen() {
               { id: 'push' as const, label: '📱 Push Notification' },
               { id: 'sms' as const, label: '💬 SMS Broadcast' },
               { id: 'audible' as const, label: '🔊 Audible Siren' },
-            ].map((ch) => {
+            ].map(ch => {
               const selected = deliveryChannels.includes(ch.id);
               return (
                 <TouchableOpacity
@@ -711,8 +779,14 @@ export default function IssueHazardWarningScreen() {
                   onPress={() => toggleDeliveryChannel(ch.id)}
                   style={[styles.channelChip, selected && styles.channelChipSelected]}
                 >
-                  <Ionicons name={selected ? 'checkbox' : 'square-outline'} size={16} color={selected ? Colors.accent.primary : Colors.text.tertiary} />
-                  <Text style={[styles.channelChipText, selected && styles.channelChipTextSelected]}>
+                  <Ionicons
+                    name={selected ? 'checkbox' : 'square-outline'}
+                    size={16}
+                    color={selected ? Colors.accent.primary : Colors.text.tertiary}
+                  />
+                  <Text
+                    style={[styles.channelChipText, selected && styles.channelChipTextSelected]}
+                  >
                     {ch.label}
                   </Text>
                 </TouchableOpacity>
@@ -721,7 +795,12 @@ export default function IssueHazardWarningScreen() {
           </View>
 
           <View style={styles.modalActionRow}>
-            <Button title="Cancel" variant="outline" onPress={() => setShowModal(false)} style={styles.modalCancelBtn} />
+            <Button
+              title="Cancel"
+              variant="outline"
+              onPress={() => setShowModal(false)}
+              style={styles.modalCancelBtn}
+            />
             <Button
               title="Submit &amp; Dispatch Warning"
               variant="primary"
@@ -736,6 +815,7 @@ export default function IssueHazardWarningScreen() {
 
       {/* Step 19: Delivery Summary Modal Overlay */}
       <FormModal
+        appearance="light"
         visible={showSummaryModal}
         onClose={() => setShowSummaryModal(false)}
         title="Step 19: Delivery Broadcast Summary"
@@ -743,9 +823,26 @@ export default function IssueHazardWarningScreen() {
         {summaryData ? (
           <View style={styles.summaryContainer}>
             <View style={styles.summaryHeader}>
-              <View style={[styles.summaryStatusBadge, { backgroundColor: getStatusBadge(summaryData.overallStatus).color + '20', borderColor: getStatusBadge(summaryData.overallStatus).color }]}>
-                <Ionicons name="checkmark-done-circle" size={20} color={getStatusBadge(summaryData.overallStatus).color} />
-                <Text style={[styles.summaryStatusText, { color: getStatusBadge(summaryData.overallStatus).color }]}>
+              <View
+                style={[
+                  styles.summaryStatusBadge,
+                  {
+                    backgroundColor: getStatusBadge(summaryData.overallStatus).color + '20',
+                    borderColor: getStatusBadge(summaryData.overallStatus).color,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="checkmark-done-circle"
+                  size={20}
+                  color={getStatusBadge(summaryData.overallStatus).color}
+                />
+                <Text
+                  style={[
+                    styles.summaryStatusText,
+                    { color: getStatusBadge(summaryData.overallStatus).color },
+                  ]}
+                >
                   {getStatusBadge(summaryData.overallStatus).label}
                 </Text>
               </View>
@@ -756,7 +853,7 @@ export default function IssueHazardWarningScreen() {
 
             <Text style={styles.summaryTableTitle}>PER-CHANNEL BROADCAST DISPATCH RESULTS:</Text>
 
-            {summaryData.channelResults.map((ch) => (
+            {summaryData.channelResults.map(ch => (
               <View key={ch.channel} style={styles.summaryRow}>
                 <View style={styles.summaryRowLeft}>
                   <Ionicons
@@ -767,7 +864,12 @@ export default function IssueHazardWarningScreen() {
                   <Text style={styles.summaryChannelName}>{ch.channel.toUpperCase()} CHANNEL</Text>
                 </View>
                 <View style={styles.summaryRowRight}>
-                  <Text style={[styles.summaryResultStatus, { color: ch.status === 'success' ? Colors.success : Colors.danger }]}>
+                  <Text
+                    style={[
+                      styles.summaryResultStatus,
+                      { color: ch.status === 'success' ? Colors.success : Colors.danger },
+                    ]}
+                  >
                     {ch.status.toUpperCase()} ({ch.recipientCount} Recv)
                   </Text>
                 </View>
@@ -784,7 +886,7 @@ export default function IssueHazardWarningScreen() {
         ) : null}
       </FormModal>
 
-      <MobileNavBar />
+      <MobileNavBar appearance="light" />
     </ScreenContainer>
   );
 }
@@ -802,14 +904,14 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   backBtn: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: 20,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F8FAFD',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
   },
   navTitleBox: {
     flex: 1,
@@ -837,6 +939,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: Spacing.md,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   beaconPill: {
     flexDirection: 'row',
@@ -858,7 +962,7 @@ const styles = StyleSheet.create({
   beaconText: {
     fontSize: FontSize.micro,
     fontWeight: '800',
-    color: '#FCA5A5',
+    color: '#B42332',
     letterSpacing: 0.5,
   },
   heroRoleTag: {
@@ -869,13 +973,13 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: FontSize.xl,
     fontWeight: '900',
-    color: '#FFFFFF',
+    color: Colors.text.primary,
     marginBottom: Spacing.xs,
   },
   heroDesc: {
     fontSize: FontSize.sm,
     color: Colors.text.secondary,
-    lineHeight: 18,
+    lineHeight: 22,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -884,15 +988,15 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   sectionTitle: {
-    fontSize: FontSize.micro,
+    fontSize: FontSize.lg,
     fontWeight: '800',
     color: Colors.text.tertiary,
-    letterSpacing: 1,
+    letterSpacing: 0,
   },
   eventCard: {
     marginBottom: Spacing.xl,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: '#DFE7F1',
   },
   eventCardHeader: {
     flexDirection: 'row',
@@ -915,7 +1019,7 @@ const styles = StyleSheet.create({
   hazardBadgeText: {
     fontSize: FontSize.micro,
     fontWeight: '900',
-    color: '#FFF',
+    color: Colors.text.primary,
   },
   warningLevelBadge: {
     backgroundColor: 'rgba(245, 158, 11, 0.2)',
@@ -928,7 +1032,7 @@ const styles = StyleSheet.create({
   warningLevelText: {
     fontSize: FontSize.micro,
     fontWeight: '800',
-    color: '#FDE047',
+    color: '#946000',
   },
   statusChip: {
     flexDirection: 'row',
@@ -962,7 +1066,7 @@ const styles = StyleSheet.create({
   eventDesc: {
     fontSize: FontSize.sm,
     color: Colors.text.secondary,
-    lineHeight: 18,
+    lineHeight: 22,
     marginBottom: Spacing.md,
   },
   areaSection: {
@@ -1008,11 +1112,11 @@ const styles = StyleSheet.create({
   },
   basinChipText: {
     fontSize: FontSize.micro,
-    color: '#38BDF8',
+    color: '#0066FF',
     fontWeight: '800',
   },
   groundReportsContainer: {
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    backgroundColor: '#F8FAFD',
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
     borderWidth: 1,
@@ -1025,6 +1129,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     marginBottom: Spacing.xs,
+    flexWrap: 'wrap',
   },
   groundReportsHeaderText: {
     fontSize: FontSize.micro,
@@ -1033,22 +1138,22 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   reportRow: {
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F8FAFD',
     padding: Spacing.xs + 2,
     borderRadius: BorderRadius.xs,
     marginBottom: 4,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: '#DFE7F1',
   },
   reportLocation: {
     fontSize: FontSize.xs,
     fontWeight: '700',
-    color: '#FFF',
+    color: Colors.text.primary,
   },
   reportDesc: {
     fontSize: FontSize.xs,
     color: Colors.text.secondary,
-    lineHeight: 16,
+    lineHeight: 22,
     marginTop: 2,
   },
   reportMeta: {
@@ -1064,6 +1169,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
     marginTop: Spacing.xs,
+    flexWrap: 'wrap',
   },
   openEventBtn: {
     flex: 1,
@@ -1135,7 +1241,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.text.tertiary,
     marginTop: 4,
-    lineHeight: 16,
+    lineHeight: 22,
   },
   rbacCard: {
     alignItems: 'center',
@@ -1173,18 +1279,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    backgroundColor: '#F8FAFD',
     padding: Spacing.md,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
     marginBottom: Spacing.xl,
   },
   rbacHintText: {
     flex: 1,
     fontSize: FontSize.xs,
     color: Colors.text.tertiary,
-    lineHeight: 16,
+    lineHeight: 22,
   },
   rbacReturnBtn: {
     width: '100%',
@@ -1205,7 +1311,7 @@ const styles = StyleSheet.create({
   },
   prefillBannerText: {
     fontSize: FontSize.xs,
-    color: '#38BDF8',
+    color: '#0066FF',
     fontWeight: '700',
   },
   fieldLabel: {
@@ -1226,11 +1332,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F8FAFD',
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
   },
   targetModeBtnActive: {
     backgroundColor: 'rgba(56, 189, 248, 0.15)',
@@ -1255,12 +1361,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F8FAFD',
     paddingVertical: 6,
     paddingHorizontal: Spacing.sm,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
   },
   districtPickChipSelected: {
     backgroundColor: 'rgba(56, 189, 248, 0.15)',
@@ -1275,7 +1381,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   recipientBadgeBox: {
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    backgroundColor: '#F8FAFD',
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
     borderWidth: 1,
@@ -1315,7 +1421,7 @@ const styles = StyleSheet.create({
   },
   exceptionNoticeText: {
     fontSize: FontSize.xs,
-    color: '#FCA5A5',
+    color: '#B42332',
     fontWeight: '700',
   },
   multilineInput: {
@@ -1331,12 +1437,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F8FAFD',
     paddingVertical: Spacing.sm,
     paddingHorizontal: Spacing.md,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
   },
   channelChipSelected: {
     backgroundColor: 'rgba(56, 189, 248, 0.15)',
@@ -1391,7 +1497,7 @@ const styles = StyleSheet.create({
   summaryHeadline: {
     fontSize: FontSize.md,
     fontWeight: '900',
-    color: '#FFF',
+    color: Colors.text.primary,
     marginBottom: Spacing.lg,
   },
   summaryTableTitle: {
@@ -1405,12 +1511,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F8FAFD',
     padding: Spacing.md,
     borderRadius: BorderRadius.md,
     marginBottom: Spacing.xs,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
   },
   summaryRowLeft: {
     flexDirection: 'row',
@@ -1420,7 +1526,7 @@ const styles = StyleSheet.create({
   summaryChannelName: {
     fontSize: FontSize.xs,
     fontWeight: '700',
-    color: '#FFF',
+    color: Colors.text.primary,
   },
   summaryRowRight: {},
   summaryResultStatus: {

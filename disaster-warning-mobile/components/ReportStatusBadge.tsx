@@ -5,7 +5,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BorderRadius, Spacing, FontSize } from '@/constants/colors';
+import { BorderRadius, Spacing, FontSize, MobileTypography } from '@/constants/colors';
 import { getReportStatusDefinition } from '@/constants/observationTypes';
 import type { ReportStatus } from '@/types/groundReport';
 
@@ -14,6 +14,7 @@ interface ReportStatusBadgeProps {
   size?: 'sm' | 'md' | 'lg';
   showIcon?: boolean;
   style?: ViewStyle;
+  appearance?: 'dark' | 'light';
 }
 
 export function ReportStatusBadge({
@@ -21,8 +22,18 @@ export function ReportStatusBadge({
   size = 'md',
   showIcon = true,
   style,
+  appearance = 'dark',
 }: ReportStatusBadgeProps) {
   const def = getReportStatusDefinition(status);
+  const color =
+    appearance === 'light'
+      ? {
+          pending_verification: '#946000',
+          verified: '#07834B',
+          rejected: '#C52A39',
+          info_requested: '#0066CC',
+        }[status] || '#946000'
+      : def.color;
 
   return (
     <View
@@ -30,10 +41,11 @@ export function ReportStatusBadge({
         styles.badge,
         {
           backgroundColor: def.bgColor,
-          borderColor: def.color,
+          borderColor: color,
         },
         size === 'sm' && styles.badgeSm,
         size === 'lg' && styles.badgeLg,
+        appearance === 'light' && styles.lightBadge,
         style,
       ]}
     >
@@ -41,15 +53,16 @@ export function ReportStatusBadge({
         <Ionicons
           name={def.icon}
           size={size === 'sm' ? 12 : size === 'lg' ? 16 : 14}
-          color={def.color}
+          color={color}
         />
       )}
       <Text
         style={[
           styles.text,
-          { color: def.color },
+          { color },
           size === 'sm' && styles.textSm,
           size === 'lg' && styles.textLg,
+          appearance === 'light' && styles.lightText,
         ]}
       >
         {def.label}
@@ -59,6 +72,8 @@ export function ReportStatusBadge({
 }
 
 const styles = StyleSheet.create({
+  lightBadge: { maxWidth: '100%', flexShrink: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  lightText: { ...MobileTypography.badge, flexShrink: 1, letterSpacing: 0, textTransform: 'none' },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',

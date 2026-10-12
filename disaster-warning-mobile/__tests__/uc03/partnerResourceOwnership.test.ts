@@ -1,3 +1,8 @@
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+jest.mock('@/services/resourceAuthorization', () => ({
+  requireDistrictOfficer: jest.fn(async () => 'district-officer'),
+  requireActiveResourceEvent: jest.fn(async () => {}),
+}));
 /**
  * Unit Tests for UC03 Partner-Owned Resources & Multi-Agency Representation.
  *
@@ -8,7 +13,7 @@
  * - Exception Flow: Resource Owner Withdraws Availability
  *   Owning organisation withdraws the resource; system updates availability and prevents further allocation.
  */
-import { createShelter, updateOccupancy } from '@/services/shelterService';
+import { createShelter } from '@/services/shelterService';
 import { createTeam, updateTeamStatus } from '@/services/rescueTeamService';
 import { createSupply, distributeSupply } from '@/services/reliefSupplyService';
 import { addDoc, updateDoc, getDoc } from 'firebase/firestore';
@@ -17,6 +22,9 @@ import type { OrganisationType } from '@/types/resources';
 describe('UC03: Partner-Owned Resources & Multi-Agency Coordination', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    installResourceFirestore({
+      'rescueTeams/team-airforce-01': { status: 'available', district: 'Ratnapura' },
+    });
   });
 
   describe('Representation of All 4 Mandated Partner Organisation Categories', () => {
@@ -38,7 +46,7 @@ describe('UC03: Partner-Owned Resources & Multi-Agency Coordination', () => {
             address: 'District Center',
             district: 'Ratnapura',
             latitude: 6.68,
-            longitude: 80.40,
+            longitude: 80.4,
             capacity: 100,
             facilities: ['Water Supply'],
             managerName: 'Manager A',
@@ -46,14 +54,14 @@ describe('UC03: Partner-Owned Resources & Multi-Agency Coordination', () => {
             organisationType: orgType,
             organisationName: `Organisation ${orgType}`,
           },
-          'officer-01',
+          'officer-01'
         );
 
         expect(addDoc).toHaveBeenCalledWith(
           expect.anything(),
           expect.objectContaining({
             organisationType: orgType,
-          }),
+          })
         );
       }
     });
@@ -71,13 +79,13 @@ describe('UC03: Partner-Owned Resources & Multi-Agency Coordination', () => {
           specialisation: 'Water Rescue',
           district: 'Kalutara',
         },
-        'officer-01',
+        'officer-01'
       );
       expect(addDoc).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           organisationType: 'armed_forces',
-        }),
+        })
       );
 
       // NGO Volunteer SAR
@@ -90,13 +98,13 @@ describe('UC03: Partner-Owned Resources & Multi-Agency Coordination', () => {
           specialisation: 'General Disaster Relief',
           district: 'Galle',
         },
-        'officer-01',
+        'officer-01'
       );
       expect(addDoc).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           organisationType: 'ngo',
-        }),
+        })
       );
     });
 
@@ -115,13 +123,13 @@ describe('UC03: Partner-Owned Resources & Multi-Agency Coordination', () => {
           district: 'Colombo',
         },
         'officer-01',
-        'event-monsoon-2026',
+        'event-monsoon-2026'
       );
       expect(addDoc).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           organisationType: 'private_donor',
-        }),
+        })
       );
     });
   });
@@ -134,7 +142,7 @@ describe('UC03: Partner-Owned Resources & Multi-Agency Coordination', () => {
         expect.anything(),
         expect.objectContaining({
           status: 'unavailable',
-        }),
+        })
       );
     });
 
@@ -161,8 +169,8 @@ describe('UC03: Partner-Owned Resources & Multi-Agency Coordination', () => {
             details: 'Field deployment',
           },
           'officer-01',
-          'event-monsoon-2026',
-        ),
+          'event-monsoon-2026'
+        )
       ).rejects.toThrow('Insufficient supplies');
     });
   });

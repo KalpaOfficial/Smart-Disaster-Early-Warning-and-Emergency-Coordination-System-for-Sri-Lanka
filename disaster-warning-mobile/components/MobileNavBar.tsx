@@ -7,76 +7,41 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, BorderRadius, Spacing, FontSize } from '@/constants/colors';
+import {
+  Colors,
+  LightColors,
+  BorderRadius,
+  Spacing,
+  FontSize,
+  MobileTypography,
+} from '@/constants/colors';
+import { useAuth } from '@/hooks/useAuth';
+import { getMobileNavItems, isMobileNavActive } from '@/constants/navigation';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-interface NavItem {
-  key: string;
-  label: string;
-  route: string;
-  iconName: keyof typeof Ionicons.glyphMap;
-  activeIconName: keyof typeof Ionicons.glyphMap;
-}
-
-const NAV_ITEMS: NavItem[] = [
-  {
-    key: 'dashboard',
-    label: 'Dashboard',
-    route: '/(app)',
-    iconName: 'grid-outline',
-    activeIconName: 'grid',
-  },
-  {
-    key: 'reports',
-    label: 'Reports',
-    route: '/(app)/reports',
-    iconName: 'document-text-outline',
-    activeIconName: 'document-text',
-  },
-  {
-    key: 'shelters',
-    label: 'Shelters',
-    route: '/(app)/resources/shelters',
-    iconName: 'home-outline',
-    activeIconName: 'home',
-  },
-  {
-    key: 'teams',
-    label: 'Rescue',
-    route: '/(app)/resources/rescue-teams',
-    iconName: 'shield-outline',
-    activeIconName: 'shield',
-  },
-  {
-    key: 'supplies',
-    label: 'Supplies',
-    route: '/(app)/resources/relief-supplies',
-    iconName: 'cube-outline',
-    activeIconName: 'cube',
-  },
-];
-
-export function MobileNavBar() {
+export function MobileNavBar({ appearance = 'dark' }: { appearance?: 'dark' | 'light' } = {}) {
   const router = useRouter();
   const pathname = usePathname();
-
-  const isActive = (itemRoute: string) => {
-    if (itemRoute === '/(app)') {
-      return pathname === '/' || pathname === '/(app)' || pathname === '/(app)/index';
-    }
-    return pathname.startsWith(itemRoute);
-  };
+  const { state } = useAuth();
+  const insets = useSafeAreaInsets();
+  const isLight = appearance === 'light';
+  const items = getMobileNavItems(state.user?.role);
 
   return (
     <View
-      style={styles.dockContainer}
+      style={[
+        styles.dockContainer,
+        isLight && styles.lightContainer,
+        isLight && { paddingBottom: Math.max(insets.bottom, 10) },
+      ]}
       pointerEvents={Platform.OS === 'web' ? undefined : 'box-none'}
     >
       <View
-        style={styles.dockSurface}
+        style={[styles.dockSurface, isLight && styles.lightSurface]}
         pointerEvents={Platform.OS === 'web' ? undefined : 'auto'}
       >
-        {NAV_ITEMS.map((item) => {
-          const active = isActive(item.route);
+        {items.map(item => {
+          const active = isMobileNavActive(pathname, item.route);
 
           return (
             <TouchableOpacity
@@ -84,18 +49,43 @@ export function MobileNavBar() {
               onPress={() => router.push(item.route as never)}
               style={styles.tabButton}
               activeOpacity={0.7}
+              accessibilityRole="tab"
+              accessibilityLabel={item.label}
+              accessibilityState={{ selected: active }}
+              aria-selected={active}
             >
-              <View style={[styles.iconWrapper, active && styles.iconWrapperActive]}>
+              <View
+                style={[
+                  styles.iconWrapper,
+                  active && styles.iconWrapperActive,
+                  active && isLight && styles.lightActiveIcon,
+                ]}
+              >
                 <Ionicons
                   name={active ? item.activeIconName : item.iconName}
                   size={20}
-                  color={active ? Colors.accent.primary : Colors.text.tertiary}
+                  color={
+                    isLight
+                      ? active
+                        ? LightColors.primary
+                        : LightColors.mutedText
+                      : active
+                        ? Colors.accent.primary
+                        : Colors.text.tertiary
+                  }
                 />
               </View>
-              <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
+              <Text
+                style={[
+                  styles.tabLabel,
+                  isLight && styles.lightLabel,
+                  active && styles.tabLabelActive,
+                  active && isLight && styles.lightActiveLabel,
+                ]}
+              >
                 {item.label}
               </Text>
-              {active && <View style={styles.activeDot} />}
+              {active && !isLight && <View style={styles.activeDot} />}
             </TouchableOpacity>
           );
         })}
@@ -105,6 +95,26 @@ export function MobileNavBar() {
 }
 
 const styles = StyleSheet.create({
+  lightContainer: {
+    backgroundColor: LightColors.surface,
+    paddingTop: 0,
+    borderTopWidth: 1,
+    borderTopColor: LightColors.border,
+  },
+  lightSurface: {
+    width: '100%',
+    maxWidth: 500,
+    backgroundColor: LightColors.surface,
+    borderWidth: 0,
+    borderRadius: 0,
+    shadowOpacity: 0,
+    elevation: 0,
+    paddingVertical: 8,
+  },
+  lightLabel: { color: LightColors.mutedText, ...MobileTypography.small },
+  lightActiveLabel: { color: LightColors.primary },
+  lightActiveIcon: { backgroundColor: LightColors.primarySoft },
+
   dockContainer: {
     position: 'absolute',
     bottom: 0,

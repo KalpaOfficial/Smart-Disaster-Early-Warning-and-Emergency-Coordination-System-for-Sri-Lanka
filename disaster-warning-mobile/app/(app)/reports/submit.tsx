@@ -1,1036 +1,713 @@
-/**
- * Submit Ground Report Screen — Multi-Step Hazard Observation Form.
- * UC02 Main Flow Steps 1-12: Observation type → Description → Photo → Location → Review → Submit.
- * Supports offline submission via queue when device has no connectivity.
- */
-import React, { useState, useCallback } from 'react';
+import { MobileTypography } from '@/constants/colors';
+/** Single-page hazard report with online submission and offline saving. */
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenContainer } from '@/components/ScreenContainer';
-import { PhotoCapture } from '@/components/PhotoCapture';
-import { LocationPicker } from '@/components/LocationPicker';
-import { ObservationTypeBadge } from '@/components/ObservationTypeBadge';
-import { Colors, BorderRadius, Spacing, FontSize } from '@/constants/colors';
+import { ReportPhotos } from '@/components/ReportPhotos';
+import { ReportLocationField } from '@/components/ReportLocationField';
+import { ConfirmationDialog } from '@/components/ConfirmationDialog';
+import { Input } from '@/components/Input';
+import { LightColors } from '@/constants/colors';
 import { OBSERVATION_TYPES } from '@/constants/observationTypes';
-import { getRoleLabel } from '@/constants/roles';
 import { getReportPermissions } from '@/constants/reportPermissions';
 import { useAuth } from '@/hooks/useAuth';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { submitGroundReport } from '@/services/groundReportService';
 import { uploadGroundReportPhoto } from '@/services/photoUploadService';
 import { queueOfflineReport } from '@/services/offlineQueueService';
+import { validateReportForm } from '@/utils/reportForm';
 import type { ObservationType, GeoLocation, CreateGroundReportData } from '@/types/groundReport';
-
-const TOTAL_STEPS = 5;
 
 export default function SubmitReportScreen() {
   const { state: authState } = useAuth();
-  const router = useRouter();
   const user = authState.user;
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const permissions = getReportPermissions(user?.role);
   const { isOffline } = useNetworkStatus();
-
-  // Multi-step state
-  const [currentStep, setCurrentStep] = useState(1);
-
-  // Form data
+  const scroll = useRef<ScrollView>(null);
+  const sectionOffsets = useRef({ details: 0, photo: 0, location: 0 });
+  const formOffset = useRef(0);
+  const submissionLock = useRef(false);
   const [observationType, setObservationType] = useState<ObservationType | null>(null);
   const [description, setDescription] = useState('');
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [location, setLocation] = useState<GeoLocation>({
-    latitude: 6.9271,
-    longitude: 79.8612,
-  });
+  const [photoUris, setPhotoUris] = useState<string[]>([]);
+  const photoUri = photoUris[0] || null;
+  const [location, setLocation] = useState<GeoLocation>({ latitude: 6.9271, longitude: 79.8612 });
+  const [locationConfirmed, setLocationConfirmed] = useState(false);
   const [locationName, setLocationName] = useState('');
-  const [district, setDistrict] = useState(user?.district || 'Colombo');
+  const [district, setDistrict] = useState(user?.district || '');
   const [isManualLocation, setIsManualLocation] = useState(false);
-
-  // Submission state
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submittedRef, setSubmittedRef] = useState('');
   const [submittedOffline, setSubmittedOffline] = useState(false);
-
-  // Validation errors
-  const [errors, setErrors] = useState<Record<string, string | null>>({});
-
-  const progressPercent = (currentStep / TOTAL_STEPS) * 100;
-
-  const validateStep = useCallback((step: number): boolean => {
-    const newErrors: Record<string, string | null> = {};
-
-    switch (step) {
-      case 1:
-        if (!observationType) {
-          newErrors.observationType = 'Please select an observation type.';
-        }
-        break;
-      case 2:
-        if (!description.trim() || description.trim().length < 10) {
-          newErrors.description = 'Description must be at least 10 characters.';
-        }
-        break;
-      case 3:
-        if (!photoUri) {
-          newErrors.photo = 'A photograph of the hazard is required.';
-        }
-        break;
-      case 4:
-        if (!locationName.trim()) {
-          newErrors.locationName = 'Location name is required.';
-        }
-        if (!district) {
-          newErrors.district = 'Please select a district.';
-        }
-        break;
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  }, [observationType, description, photoUri, locationName, district]);
-
-  const handleNext = () => {
-    if (validateStep(currentStep)) {
-      setCurrentStep((prev) => Math.min(prev + 1, TOTAL_STEPS));
-    }
+  const [submitError, setSubmitError] = useState('');
+  const [errors, setErrors] = useState<Record<string, string | undefined>>({});
+  const [leaveConfirmation, setLeaveConfirmation] = useState(false);
+  const clearError = (field: string) => {
+    setErrors(prev => ({ ...prev, [field]: undefined }));
+    setSubmitError('');
   };
 
-  const handleBack = () => {
-    if (currentStep === 1) {
-      router.back();
-    } else {
-      setCurrentStep((prev) => prev - 1);
-    }
-  };
-
-  const handleSubmit = useCallback(async () => {
-    if (!user || !observationType || !photoUri) return;
-    if (!permissions.canSubmit) {
-      Alert.alert(
-        'Submission Prohibited',
-        `Users with role '${user?.role ? getRoleLabel(user.role) : 'Unknown'}' cannot submit ground observations. Only registered citizens and volunteers can submit reports.`,
-      );
+  const handleSubmit = async () => {
+    if (submissionLock.current || !user || !permissions.canSubmit) return;
+    const formErrors = validateReportForm(
+      {
+        observationType: observationType || undefined,
+        description,
+        photoUri: photoUri || undefined,
+        photoUris,
+        location,
+        locationName,
+        district,
+      },
+      locationConfirmed
+    );
+    setErrors(formErrors);
+    setSubmitError('');
+    Keyboard.dismiss();
+    if (Object.keys(formErrors).length) {
+      const section =
+        formErrors.observationType || formErrors.description
+          ? 'details'
+          : formErrors.photo
+            ? 'photo'
+            : 'location';
+      scroll.current?.scrollTo({
+        y: Math.max(0, formOffset.current + sectionOffsets.current[section] - 12),
+        animated: true,
+      });
       return;
     }
-    if (!validateStep(4)) return;
-
+    if (!observationType || !photoUri) return;
+    submissionLock.current = true;
     setSubmitting(true);
-    const captureTime = new Date().toISOString();
-
-    const reportData: CreateGroundReportData = {
+    const data: CreateGroundReportData = {
       observationType,
       description: description.trim(),
       photoUri,
+      photoUris,
       location,
       locationName: locationName.trim(),
       district,
       isManualLocation,
-      captureTime,
+      captureTime: new Date().toISOString(),
     };
-
+    const submitter = { id: user.id, fullName: user.fullName, role: user.role };
+    const saveOffline = async () => {
+      await queueOfflineReport(data, submitter);
+      setSubmittedOffline(true);
+      setSubmitted(true);
+    };
     try {
-      // Check connectivity
-      const netState = await NetInfo.fetch();
-      const isOnline = netState.isConnected && netState.isInternetReachable !== false;
-
-      if (!isOnline) {
-        // Queue for offline sync
-        await queueOfflineReport(reportData, {
-          id: user.id,
-          fullName: user.fullName,
-          role: user.role,
-        });
-        setSubmittedOffline(true);
-        setSubmitted(true);
+      const net = await NetInfo.fetch();
+      if (!net.isConnected || net.isInternetReachable === false) {
+        await saveOffline();
         return;
       }
-
-      // Online: Upload photo then submit report
-      const uploadResult = await uploadGroundReportPhoto(
-        photoUri,
-        `report-${Date.now()}`,
-      );
-
+      const identifier = 'report-' + Date.now();
+      const photos = [];
+      for (let index = 0; index < photoUris.length; index++) {
+        photos.push(
+          await uploadGroundReportPhoto(photoUris[index], identifier + '-photo-' + index)
+        );
+      }
       const result = await submitGroundReport(
-        reportData,
-        uploadResult.photoUrl,
-        uploadResult.photoPath,
-        {
-          id: user.id,
-          fullName: user.fullName,
-          role: user.role,
-        },
+        data,
+        photos[0].photoUrl,
+        photos[0].photoPath,
+        submitter,
+        photos
       );
-
       setSubmittedRef(result.referenceNumber);
       setSubmittedOffline(false);
       setSubmitted(true);
     } catch (err) {
-      // If network error during submission, fall back to offline queue
+      // Preserve the report locally if connectivity is lost during submission.
       try {
-        await queueOfflineReport(reportData, {
-          id: user.id,
-          fullName: user.fullName,
-          role: user.role,
-        });
-        setSubmittedOffline(true);
-        setSubmitted(true);
-      } catch (_queueErr) {
-        Alert.alert(
-          'Submission Failed',
-          (err as Error)?.message || 'An unexpected error occurred. Please try again.',
+        await saveOffline();
+      } catch {
+        setSubmitError(
+          err instanceof Error
+            ? err.message
+            : 'We could not send or save your report. Please try again.'
         );
       }
     } finally {
+      submissionLock.current = false;
       setSubmitting(false);
     }
-  }, [
-    user,
-    observationType,
-    photoUri,
-    permissions.canSubmit,
-    validateStep,
-    description,
-    location,
-    locationName,
-    district,
-    isManualLocation,
-  ]);
+  };
 
-  // --- Success View ---
-  if (submitted) {
+  const handleBack = () => {
+    if (submitting) return;
+    const leave = () => router.back();
+    if (
+      !observationType &&
+      !description.trim() &&
+      !photoUri &&
+      !locationName.trim() &&
+      !locationConfirmed
+    ) {
+      leave();
+      return;
+    }
+    Keyboard.dismiss();
+    setLeaveConfirmation(true);
+  };
+
+  if (submitted || !permissions.canSubmit) {
     return (
-      <ScreenContainer>
-        <View style={styles.successContainer}>
-          <View style={styles.successIconWrapper}>
+      <ScreenContainer style={styles.lightScreen} contentStyle={styles.shell}>
+        <StatusBar style="dark" />
+        <ScrollView contentContainerStyle={styles.resultContent}>
+          <View style={[styles.resultIcon, submittedOffline && styles.offlineIcon]}>
             <Ionicons
-              name={submittedOffline ? 'cloud-upload-outline' : 'checkmark-circle'}
-              size={56}
-              color={submittedOffline ? Colors.warning : Colors.success}
+              name={
+                !submitted
+                  ? 'shield-outline'
+                  : submittedOffline
+                    ? 'cloud-upload-outline'
+                    : 'checkmark'
+              }
+              size={44}
+              color={submittedOffline ? '#A16B06' : '#079A60'}
             />
           </View>
-
-          <Text style={styles.successTitle}>
-            {submittedOffline ? 'Report Queued for Sync' : 'Report Submitted!'}
+          <Text accessibilityRole="header" style={styles.resultTitle}>
+            {!submitted
+              ? 'Citizen and volunteer reports'
+              : submittedOffline
+                ? 'Report saved on this device'
+                : 'Thank you for reporting'}
           </Text>
-
-          <Text style={styles.successDescription}>
-            {submittedOffline
-              ? 'Your report has been saved locally and will be automatically synced when connectivity is restored.'
-              : `Your ground report has been submitted and is now pending DMC verification.`}
+          <Text style={styles.resultDescription}>
+            {!submitted
+              ? 'Hazard reports can be submitted by citizens and community volunteers.'
+              : submittedOffline
+                ? 'Your report is waiting to upload when a connection is available. You can track it in Saved reports.'
+                : 'Your report has been sent to the DMC team for review. Track its status in My reports.'}
           </Text>
-
-          {!submittedOffline && submittedRef && (
-            <View style={styles.refCard}>
-              <Text style={styles.refLabel}>Reference Number</Text>
-              <Text style={styles.refValue}>{submittedRef}</Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            style={styles.successBtn}
-            onPress={() =>
-              router.replace({
-                pathname: '/(app)/reports',
-                params: { tab: 'my_reports' },
-              } as never)
-            }
-            activeOpacity={0.85}
-          >
-            <Ionicons name="list" size={16} color="#080C14" />
-            <Text style={styles.successBtnText}>View My Reports</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.successBtnSecondary}
-            onPress={() => router.replace('/(app)' as never)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.successBtnSecondaryText}>Back to Dashboard</Text>
-          </TouchableOpacity>
-        </View>
-      </ScreenContainer>
-    );
-  }
-
-  // --- Access Restricted View (UC02 Phase 7.3: Role-Based Access) ---
-  if (!permissions.canSubmit) {
-    return (
-      <ScreenContainer>
-        <View style={styles.restrictedContainer}>
-          <View style={styles.restrictedIconBox}>
-            <Ionicons name="shield-outline" size={48} color={Colors.accent.primary} />
-          </View>
-          <Text style={styles.restrictedTitle}>Submission Access Restricted</Text>
-          <Text style={styles.restrictedDesc}>
-            Ground hazard observations can only be submitted by registered Citizens and Community Disaster Volunteers in the field.
-          </Text>
-          <View style={styles.restrictedRoleBox}>
-            <Text style={styles.restrictedRoleLabel}>Your Current Role:</Text>
-            <Text style={styles.restrictedRoleValue}>
-              {user?.role ? getRoleLabel(user.role) : 'Unassigned'}
-            </Text>
-            <Text style={styles.restrictedRoleHint}>
-              {user?.role === 'dmc_officer'
-                ? 'DMC Duty Officers review and verify incoming citizen reports in the Verification Queue.'
-                : 'District Officers coordinate tactical emergency resources, shelters, and relief distribution.'}
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={styles.restrictedBackBtn}
-            onPress={() => router.replace('/(app)/reports' as never)}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="arrow-back" size={18} color="#080C14" />
-            <Text style={styles.restrictedBackBtnText}>Back to Reports Hub</Text>
-          </TouchableOpacity>
-        </View>
-      </ScreenContainer>
-    );
-  }
-
-  // --- Step Renderers ---
-  const renderStep1 = () => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Select Observation Type</Text>
-      <Text style={styles.stepDescription}>
-        What type of hazard are you observing? Select the category that best describes the situation.
-      </Text>
-
-      <View style={styles.typeGrid}>
-        {OBSERVATION_TYPES.map((type) => {
-          const selected = observationType === type.value;
-          return (
-            <TouchableOpacity
-              key={type.value}
-              style={[
-                styles.typeCard,
-                selected && {
-                  borderColor: type.color,
-                  backgroundColor: type.bgColor,
-                },
-              ]}
-              onPress={() => {
-                setObservationType(type.value);
-                setErrors((prev) => ({ ...prev, observationType: null }));
-              }}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.typeIconWrapper, { backgroundColor: type.bgColor }]}>
-                <Ionicons name={type.icon} size={24} color={type.color} />
+          {!!submittedRef && (
+            <View style={styles.referenceCard}>
+              <Text style={styles.referenceLabel}>REPORT REFERENCE</Text>
+              <Text selectable style={styles.referenceValue}>
+                {submittedRef}
+              </Text>
+              <View style={styles.pendingBadge}>
+                <Text style={styles.pendingText}>Pending review</Text>
               </View>
-              <Text style={styles.typeLabel}>{type.shortLabel}</Text>
-              <Text style={styles.typeDesc} numberOfLines={2}>
-                {type.description}
-              </Text>
-              {selected && (
-                <View style={[styles.typeCheck, { backgroundColor: type.color }]}>
-                  <Ionicons name="checkmark" size={12} color="#FFF" />
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {errors.observationType && (
-        <Text style={styles.errorText}>{errors.observationType}</Text>
-      )}
-    </View>
-  );
-
-  const renderStep2 = () => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Describe the Hazard</Text>
-      <Text style={styles.stepDescription}>
-        Provide a clear, detailed description of the hazard you are observing. Include estimated
-        severity, scale, and any immediate risks.
-      </Text>
-
-      <TextInput
-        style={[
-          styles.textArea,
-          errors.description ? styles.inputError : null,
-        ]}
-        value={description}
-        onChangeText={(text) => {
-          setDescription(text);
-          if (text.trim().length >= 10) {
-            setErrors((prev) => ({ ...prev, description: null }));
-          }
-        }}
-        placeholder="e.g. Water level at Kelani bridge rising rapidly, approximately 2m above normal. Road partially submerged. Multiple vehicles stranded..."
-        placeholderTextColor={Colors.input.placeholder}
-        multiline
-        textAlignVertical="top"
-        maxLength={1000}
-      />
-      <Text style={styles.charCount}>{description.length} / 1000</Text>
-
-      {errors.description && (
-        <Text style={styles.errorText}>{errors.description}</Text>
-      )}
-    </View>
-  );
-
-  const renderStep3 = () => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Capture Evidence Photo</Text>
-      <Text style={styles.stepDescription}>
-        Take a photograph or select an existing image that clearly shows the hazard. This evidence
-        will be reviewed by a DMC Duty Officer.
-      </Text>
-
-      <PhotoCapture
-        photoUri={photoUri}
-        onPhotoSelected={(uri) => {
-          setPhotoUri(uri);
-          setErrors((prev) => ({ ...prev, photo: null }));
-        }}
-        onPhotoRemoved={() => setPhotoUri(null)}
-        error={errors.photo}
-      />
-    </View>
-  );
-
-  const renderStep4 = () => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Confirm Location</Text>
-      <Text style={styles.stepDescription}>
-        Your GPS coordinates are automatically obtained. Adjust the pin or enter the location
-        manually if GPS is unavailable.
-      </Text>
-
-      <LocationPicker
-        location={location}
-        locationName={locationName}
-        district={district}
-        isManualLocation={isManualLocation}
-        onLocationChange={(loc, manual) => {
-          setLocation(loc);
-          setIsManualLocation(manual);
-        }}
-        onLocationNameChange={(name) => {
-          setLocationName(name);
-          if (name.trim()) {
-            setErrors((prev) => ({ ...prev, locationName: null }));
-          }
-        }}
-        onDistrictChange={setDistrict}
-        error={errors.locationName || errors.district}
-      />
-    </View>
-  );
-
-  const renderStep5 = () => {
-    const obsType = OBSERVATION_TYPES.find((t) => t.value === observationType);
-    return (
-      <View style={styles.stepContent}>
-        <Text style={styles.stepTitle}>Review & Submit</Text>
-        <Text style={styles.stepDescription}>
-          Please review all the information below before submitting your ground report to the DMC.
-        </Text>
-
-        {/* Summary Card */}
-        <View style={styles.summaryCard}>
-          {/* Observation Type */}
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Observation Type</Text>
-            {obsType && <ObservationTypeBadge type={observationType!} size="sm" />}
-          </View>
-
-          {/* Description Preview */}
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Description</Text>
-            <Text style={styles.summaryValue} numberOfLines={3}>
-              {description}
-            </Text>
-          </View>
-
-          {/* Photo Preview */}
-          {photoUri && (
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Evidence Photo</Text>
-              <Image
-                source={{ uri: photoUri }}
-                style={styles.summaryPhoto}
-                contentFit="cover"
-                transition={200}
-              />
             </View>
           )}
-
-          {/* Location */}
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Location</Text>
-            <View>
-              <Text style={styles.summaryValue}>{locationName || 'Not set'}</Text>
-              <Text style={styles.summaryMuted}>
-                {district} • {location.latitude.toFixed(4)}°N, {location.longitude.toFixed(4)}°E
-                {isManualLocation ? ' (Manual)' : ' (GPS)'}
-              </Text>
-            </View>
-          </View>
-
-          {/* Submitter */}
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Observer</Text>
-            <Text style={styles.summaryValue}>
-              {user?.fullName} ({user?.role === 'volunteer' ? 'Volunteer' : 'Citizen'})
+          <TouchableOpacity
+            style={styles.primaryButton}
+            accessibilityRole="button"
+            onPress={() =>
+              router.replace(
+                submittedOffline
+                  ? '/(app)/reports/offline-queue'
+                  : { pathname: '/(app)/reports', params: { tab: 'my_reports' } }
+              )
+            }
+          >
+            <Text style={styles.primaryText}>
+              {!submitted
+                ? 'Back to reports'
+                : submittedOffline
+                  ? 'View saved reports'
+                  : 'View my reports'}
             </Text>
-          </View>
-        </View>
-      </View>
+            <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            accessibilityRole="button"
+            onPress={() => router.replace('/(app)')}
+          >
+            <Text style={styles.secondaryText}>Back to Home</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </ScreenContainer>
     );
-  };
-
-  const steps: Record<number, () => React.ReactNode> = {
-    1: renderStep1,
-    2: renderStep2,
-    3: renderStep3,
-    4: renderStep4,
-    5: renderStep5,
-  };
-
-  const stepLabels = ['Type', 'Details', 'Photo', 'Location', 'Review'];
+  }
 
   return (
-    <ScreenContainer>
+    <ScreenContainer style={styles.screen} contentStyle={styles.shell}>
+      <StatusBar style="light" />
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={handleBack} activeOpacity={0.7}>
-            <Ionicons name="chevron-back" size={20} color={Colors.text.secondary} />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.headerTitle}>Submit Ground Report</Text>
-            <Text style={styles.headerSubtitle}>Step {currentStep} of {TOTAL_STEPS}</Text>
-          </View>
-        </View>
-
-        {/* Progress Bar */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
-          </View>
-          <View style={styles.stepIndicators}>
-            {stepLabels.map((label, i) => {
-              const stepNum = i + 1;
-              const isCompleted = currentStep > stepNum;
-              const isCurrent = currentStep === stepNum;
-              return (
-                <View key={label} style={styles.stepDot}>
-                  <View
-                    style={[
-                      styles.dot,
-                      isCompleted && styles.dotCompleted,
-                      isCurrent && styles.dotCurrent,
-                    ]}
-                  >
-                    {isCompleted ? (
-                      <Ionicons name="checkmark" size={10} color="#080C14" />
-                    ) : (
-                      <Text style={[styles.dotText, isCurrent && styles.dotTextCurrent]}>
-                        {stepNum}
+        <ScrollView
+          ref={scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
+        >
+          <LinearGradient
+            colors={['#0855D9', '#1265D9', '#2475D5']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.hero}
+          >
+            <View style={styles.headerRow}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={handleBack}
+                disabled={submitting}
+                accessibilityRole="button"
+                accessibilityLabel="Back"
+              >
+                <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+              <Text style={styles.headerLabel}>Community reporting</Text>
+              <View style={styles.headerIcon}>
+                <Ionicons name="camera-outline" size={22} color="#FFFFFF" />
+              </View>
+            </View>
+            <Text accessibilityRole="header" style={styles.heroTitle}>
+              Report a hazard
+            </Text>
+            <Text style={styles.heroDescription}>
+              Share what you see. Help your community respond.
+            </Text>
+          </LinearGradient>
+          <View
+            style={styles.formBody}
+            onLayout={e => {
+              formOffset.current = e.nativeEvent.layout.y;
+            }}
+          >
+            {isOffline && (
+              <View style={styles.offlineBanner}>
+                <Ionicons name="cloud-offline-outline" size={19} color="#A16B06" />
+                <Text style={styles.offlineText}>
+                  You are offline. Your report will be saved on this device until it can be
+                  uploaded.
+                </Text>
+              </View>
+            )}
+            <View
+              style={styles.card}
+              onLayout={e => {
+                sectionOffsets.current.details = e.nativeEvent.layout.y;
+              }}
+            >
+              <View style={styles.sectionHeading}>
+                <View style={styles.sectionIcon}>
+                  <Ionicons name="warning-outline" size={19} color={LightColors.primary} />
+                </View>
+                <View style={styles.flex}>
+                  <Text style={styles.sectionTitle}>What happened?</Text>
+                  <Text style={styles.sectionCaption}>Choose a hazard and add a few details.</Text>
+                </View>
+              </View>
+              <View style={styles.typeGrid}>
+                {OBSERVATION_TYPES.map(type => {
+                  const selected = observationType === type.value;
+                  return (
+                    <TouchableOpacity
+                      key={type.value}
+                      disabled={submitting}
+                      onPress={() => {
+                        setObservationType(type.value);
+                        clearError('observationType');
+                      }}
+                      style={[styles.typeOption, selected && styles.typeSelected]}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: selected, disabled: submitting }}
+                      accessibilityLabel={type.shortLabel}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name={type.icon}
+                        size={20}
+                        color={selected ? LightColors.primary : LightColors.secondaryText}
+                      />
+                      <Text style={[styles.typeLabel, selected && styles.typeLabelSelected]}>
+                        {type.shortLabel}
                       </Text>
-                    )}
-                  </View>
-                  <Text style={[styles.dotLabel, isCurrent && styles.dotLabelCurrent]}>
-                    {label}
+                      {selected && (
+                        <Ionicons name="checkmark-circle" size={15} color={LightColors.primary} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {!!errors.observationType && (
+                <Text style={styles.errorText} accessibilityLiveRegion="polite">
+                  {errors.observationType}
+                </Text>
+              )}
+              <Input
+                label="Description"
+                placeholder="e.g. Water is rising near the bridge and covering the road."
+                appearance="light"
+                value={description}
+                editable={!submitting}
+                onChangeText={val => {
+                  setDescription(val);
+                  clearError('description');
+                }}
+                multiline
+                textAlignVertical="top"
+                maxLength={1000}
+                inputStyle={styles.descriptionInput}
+                containerStyle={styles.descriptionField}
+                error={errors.description}
+              />
+              <Text style={styles.charCount}>{description.length}/1000</Text>
+            </View>
+            <View
+              style={styles.card}
+              onLayout={e => {
+                sectionOffsets.current.photo = e.nativeEvent.layout.y;
+              }}
+            >
+              <View style={styles.sectionHeading}>
+                <View style={styles.sectionIcon}>
+                  <Ionicons name="images-outline" size={19} color={LightColors.primary} />
+                </View>
+                <View style={styles.flex}>
+                  <Text style={styles.sectionTitle}>Add a photo</Text>
+                  <Text style={styles.sectionCaption}>
+                    A clear photo helps the team review your report.
                   </Text>
                 </View>
-              );
-            })}
+              </View>
+              <ReportPhotos
+                disabled={submitting}
+                photos={photoUris}
+                onChange={uris => {
+                  setPhotoUris(uris);
+                  clearError('photo');
+                }}
+                error={errors.photo}
+              />
+            </View>
+            <View
+              style={styles.card}
+              onLayout={e => {
+                sectionOffsets.current.location = e.nativeEvent.layout.y;
+              }}
+            >
+              <View style={styles.sectionHeading}>
+                <View style={styles.sectionIcon}>
+                  <Ionicons name="location-outline" size={19} color={LightColors.primary} />
+                </View>
+                <View style={styles.flex}>
+                  <Text style={styles.sectionTitle}>Where is it?</Text>
+                  <Text style={styles.sectionCaption}>
+                    Add the location where you observed the hazard.
+                  </Text>
+                </View>
+              </View>
+              <ReportLocationField
+                location={location}
+                confirmed={locationConfirmed}
+                isManual={isManualLocation}
+                locationName={locationName}
+                district={district}
+                disabled={submitting}
+                errors={errors}
+                onLocationChange={(loc, manual) => {
+                  setLocation(loc);
+                  setIsManualLocation(manual);
+                  setLocationConfirmed(true);
+                  clearError('location');
+                }}
+                onInvalidLocation={() => setLocationConfirmed(false)}
+                onNameChange={val => {
+                  setLocationName(val);
+                  clearError('locationName');
+                }}
+                onDistrictChange={val => {
+                  setDistrict(val);
+                  clearError('district');
+                }}
+              />
+            </View>
+            <View style={styles.helperRow}>
+              <Ionicons
+                name="information-circle-outline"
+                size={17}
+                color={LightColors.secondaryText}
+              />
+              <Text style={styles.helperText}>
+                Check your details before sending. All fields and a photo are required.
+              </Text>
+            </View>
+            {!!submitError && (
+              <View style={styles.submitError} accessibilityRole="alert">
+                <Text style={styles.errorText}>{submitError}</Text>
+              </View>
+            )}
           </View>
-        </View>
-
-        {/* Offline indicator banner */}
-        {isOffline && (
-          <View style={styles.offlineBanner}>
-            <Ionicons name="cloud-offline" size={14} color="#F59E0B" />
-            <Text style={styles.offlineBannerText}>
-              Offline mode: Report will be queued locally and automatically uploaded when connected.
-            </Text>
-          </View>
-        )}
-
-        {/* Step Content */}
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {steps[currentStep]?.()}
         </ScrollView>
-
-        {/* Footer Navigation */}
-        <View style={styles.footer}>
-          {currentStep < TOTAL_STEPS ? (
-            <TouchableOpacity
-              style={styles.nextBtn}
-              onPress={handleNext}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.nextBtnText}>Continue</Text>
-              <Ionicons name="arrow-forward" size={16} color="#080C14" />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={[styles.nextBtn, styles.submitBtn]}
-              onPress={handleSubmit}
-              disabled={submitting}
-              activeOpacity={0.85}
-            >
-              {submitting ? (
-                <ActivityIndicator size="small" color="#080C14" />
-              ) : (
-                <>
-                  <Ionicons name="paper-plane" size={16} color="#080C14" />
-                  <Text style={styles.nextBtnText}>Submit Report</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          <TouchableOpacity
+            onPress={handleSubmit}
+            disabled={submitting}
+            style={[styles.primaryButton, submitting && styles.busyButton]}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: submitting, busy: submitting }}
+          >
+            {submitting ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Ionicons
+                name={isOffline ? 'cloud-upload-outline' : 'paper-plane-outline'}
+                size={19}
+                color="#FFFFFF"
+              />
+            )}
+            <Text style={styles.primaryText}>
+              {submitting
+                ? 'Sending your report...'
+                : isOffline
+                  ? 'Save report offline'
+                  : 'Submit report'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+      <ConfirmationDialog
+        visible={leaveConfirmation}
+        title="Leave this report?"
+        message="Your unsent changes will be lost. Keep editing to finish your report."
+        confirmLabel="Leave report"
+        cancelLabel="Keep editing"
+        icon="exit-outline"
+        onCancel={() => setLeaveConfirmation(false)}
+        onConfirm={() => {
+          setLeaveConfirmation(false);
+          router.back();
+        }}
+      />
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.md,
+  flex: { flex: 1 },
+  screen: { backgroundColor: '#0855D9' },
+  lightScreen: { backgroundColor: LightColors.background },
+  shell: {
+    backgroundColor: LightColors.background,
+    borderColor: LightColors.border,
+    shadowOpacity: 0.06,
   },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  scrollContent: { paddingBottom: 12 },
+  hero: {
+    paddingHorizontal: 22,
+    paddingTop: 14,
+    paddingBottom: 42,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
   },
-  headerTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: '800',
-    color: Colors.text.primary,
-    letterSpacing: -0.3,
-  },
-  headerSubtitle: {
-    fontSize: FontSize.xs,
-    color: Colors.text.tertiary,
-    marginTop: 1,
-  },
-
-  // Progress
-  progressContainer: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing.md,
-  },
-  progressTrack: {
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginBottom: Spacing.sm,
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: Colors.accent.primary,
-    borderRadius: 2,
-  },
-  stepIndicators: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  stepDot: {
-    alignItems: 'center',
-  },
-  dot: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 3,
-  },
-  dotCompleted: {
-    backgroundColor: Colors.accent.primary,
-  },
-  dotCurrent: {
-    backgroundColor: 'rgba(56, 189, 248, 0.2)',
-    borderWidth: 1.5,
-    borderColor: Colors.accent.primary,
-  },
-  dotText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: Colors.text.tertiary,
-  },
-  dotTextCurrent: {
-    color: Colors.accent.primary,
-  },
-  dotLabel: {
-    fontSize: 9,
-    fontWeight: '600',
-    color: Colors.text.muted,
-  },
-  dotLabelCurrent: {
-    color: Colors.accent.primary,
-  },
-
-  // Content
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: Spacing.xl,
-    paddingBottom: Spacing.huge,
-  },
-  stepContent: {
-    paddingTop: Spacing.sm,
-  },
-  stepTitle: {
-    fontSize: FontSize.xl,
-    fontWeight: '800',
-    color: Colors.text.primary,
-    marginBottom: Spacing.xs,
-    letterSpacing: -0.3,
-  },
-  stepDescription: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-    lineHeight: 20,
-    marginBottom: Spacing.lg,
-  },
-
-  // Step 1: Observation Type
-  typeGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.md,
-  },
-  typeCard: {
-    width: '47%',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.md,
-    position: 'relative',
-  },
-  typeIconWrapper: {
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 22 },
+  backButton: {
     width: 44,
     height: 44,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerLabel: { flex: 1, color: '#DCEBFF', ...MobileTypography.caption, fontWeight: '600' },
+  headerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroTitle: {
+    color: '#FFFFFF',
+    fontSize: 29,
+    lineHeight: 36,
+    fontWeight: '800',
+    letterSpacing: -0.8,
+  },
+  heroDescription: { color: '#E4F0FF', ...MobileTypography.body, marginTop: 8 },
+  formBody: { paddingHorizontal: 18, marginTop: -22 },
+  card: {
+    backgroundColor: '#FFFFFF',
     borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#E7EEF8',
+    padding: 18,
+    marginBottom: 14,
+    shadowColor: '#154893',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.05,
+    shadowRadius: 16,
+    elevation: 2,
+  },
+  sectionHeading: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 18 },
+  sectionIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    backgroundColor: LightColors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: Spacing.sm,
   },
+  sectionTitle: {
+    color: LightColors.text,
+    ...MobileTypography.section,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  sectionCaption: { color: LightColors.secondaryText, ...MobileTypography.caption, marginTop: 3 },
+  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 },
+  typeOption: {
+    flexBasis: '46%',
+    flexGrow: 1,
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    borderWidth: 1,
+    borderColor: LightColors.border,
+    borderRadius: 13,
+    backgroundColor: '#F8FAFD',
+    padding: 10,
+  },
+  typeSelected: { borderColor: LightColors.primary, backgroundColor: LightColors.primarySoft },
   typeLabel: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    color: Colors.text.primary,
-    marginBottom: 4,
-  },
-  typeDesc: {
-    fontSize: FontSize.micro + 1,
-    color: Colors.text.tertiary,
-    lineHeight: 15,
-  },
-  typeCheck: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // Step 2: Description
-  textArea: {
-    backgroundColor: Colors.input.bg,
-    borderWidth: 1,
-    borderColor: Colors.input.border,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.md,
-    color: Colors.input.text,
-    fontSize: FontSize.md,
-    minHeight: 160,
-    lineHeight: 22,
-  },
-  inputError: {
-    borderColor: Colors.danger,
-  },
-  charCount: {
-    fontSize: FontSize.micro,
-    color: Colors.text.muted,
-    textAlign: 'right',
-    marginTop: Spacing.xs,
-  },
-
-  // Errors
-  errorText: {
-    fontSize: FontSize.xs,
-    color: Colors.danger,
-    marginTop: Spacing.sm,
-    fontWeight: '600',
-  },
-
-  // Step 5: Summary
-  summaryCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: BorderRadius.lg,
-    overflow: 'hidden',
-  },
-  summaryRow: {
-    padding: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  summaryLabel: {
-    fontSize: FontSize.micro,
-    fontWeight: '700',
-    color: Colors.text.tertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: Spacing.xs,
-  },
-  summaryValue: {
-    fontSize: FontSize.sm,
-    fontWeight: '600',
-    color: Colors.text.primary,
-    lineHeight: 20,
-  },
-  summaryMuted: {
-    fontSize: FontSize.micro,
-    color: Colors.text.tertiary,
-    marginTop: 2,
-  },
-  summaryPhoto: {
-    width: '100%',
-    height: 150,
-    borderRadius: BorderRadius.md,
-    backgroundColor: '#000',
-  },
-
-  // Footer
-  footer: {
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.md,
-    paddingBottom: Spacing.xxl,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  nextBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: Colors.accent.primary,
-    paddingVertical: Spacing.md + 2,
-    borderRadius: BorderRadius.md,
-  },
-  submitBtn: {
-    backgroundColor: Colors.accent.emerald,
-  },
-  nextBtnText: {
-    fontSize: FontSize.md,
-    fontWeight: '800',
-    color: '#080C14',
-  },
-
-  // Success
-  successContainer: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.xxxl,
+    color: LightColors.secondaryText,
+    ...MobileTypography.caption,
+    fontWeight: '600',
   },
-  successIconWrapper: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: 'rgba(16, 185, 129, 0.14)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.xxl,
+  typeLabelSelected: { color: LightColors.primary },
+  descriptionInput: { minHeight: 96, lineHeight: 21 },
+  descriptionField: { marginBottom: 4 },
+  charCount: { textAlign: 'right', ...MobileTypography.caption, color: LightColors.mutedText },
+  errorText: { color: LightColors.danger, ...MobileTypography.caption, marginBottom: 10 },
+  submitError: { backgroundColor: LightColors.dangerSoft, padding: 12, borderRadius: 12 },
+  helperRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 4, marginTop: 2, marginBottom: 10 },
+  helperText: { flex: 1, color: LightColors.secondaryText, ...MobileTypography.caption },
+  footer: {
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: LightColors.border,
+    paddingHorizontal: 20,
+    paddingTop: 12,
   },
-  successTitle: {
-    fontSize: FontSize.xxl,
-    fontWeight: '800',
-    color: Colors.text.primary,
-    marginBottom: Spacing.sm,
-    textAlign: 'center',
-  },
-  successDescription: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: Spacing.xxl,
-  },
-  refCard: {
-    backgroundColor: 'rgba(56, 189, 248, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.3)',
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.md,
-    marginBottom: Spacing.xxl,
-    alignItems: 'center',
-  },
-  refLabel: {
-    fontSize: FontSize.micro,
-    fontWeight: '700',
-    color: Colors.text.tertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  refValue: {
-    fontSize: FontSize.xl,
-    fontWeight: '800',
-    color: Colors.accent.primary,
-    letterSpacing: 1,
-  },
-  successBtn: {
+  primaryButton: {
+    width: '100%',
+    minHeight: 52,
+    borderRadius: 15,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: Colors.accent.primary,
-    paddingHorizontal: Spacing.xxl,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-    marginBottom: Spacing.md,
+    justifyContent: 'center',
+    gap: 9,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: LightColors.primary,
+    shadowColor: LightColors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    elevation: 2,
   },
-  successBtnText: {
-    fontSize: FontSize.md,
-    fontWeight: '800',
-    color: '#080C14',
-  },
-  successBtnSecondary: {
-    paddingVertical: Spacing.sm,
-  },
-  successBtnSecondaryText: {
-    fontSize: FontSize.sm,
-    fontWeight: '600',
-    color: Colors.text.secondary,
-  },
+  primaryText: { color: '#FFFFFF', ...MobileTypography.button, fontWeight: '700' },
+  busyButton: { backgroundColor: LightColors.primaryPressed },
   offlineBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.xs,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(245, 158, 11, 0.25)',
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.xs + 2,
+    gap: 9,
+    backgroundColor: '#FFF5DC',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 14,
   },
-  offlineBannerText: {
-    fontSize: FontSize.micro,
-    color: '#F59E0B',
-    fontWeight: '600',
-    flex: 1,
+  offlineText: { flex: 1, color: '#946000', ...MobileTypography.caption },
+  resultContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+    paddingVertical: 44,
   },
-  restrictedContainer: {
-    flex: 1,
+  resultIcon: {
+    width: 90,
+    height: 90,
+    borderRadius: 30,
+    backgroundColor: '#E2F7EB',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Spacing.xl,
+    marginBottom: 28,
   },
-  restrictedIconBox: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.lg,
-  },
-  restrictedTitle: {
-    fontSize: FontSize.lg,
+  offlineIcon: { backgroundColor: '#FFF2D4' },
+  resultTitle: {
+    color: LightColors.text,
+    fontSize: 26,
+    lineHeight: 33,
     fontWeight: '800',
-    color: Colors.text.primary,
+    letterSpacing: -0.7,
     textAlign: 'center',
-    marginBottom: Spacing.sm,
   },
-  restrictedDesc: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
+  resultDescription: {
+    color: LightColors.secondaryText,
+    ...MobileTypography.body,
+
     textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: Spacing.xl,
+    marginTop: 14,
+    marginBottom: 26,
   },
-  restrictedRoleBox: {
+  referenceCard: {
     width: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    marginBottom: Spacing.xl,
+    borderColor: LightColors.border,
+    borderRadius: 20,
+    padding: 22,
     alignItems: 'center',
+    marginBottom: 28,
   },
-  restrictedRoleLabel: {
-    fontSize: FontSize.micro,
-    color: Colors.text.tertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 2,
+  referenceLabel: {
+    color: LightColors.mutedText,
+    ...MobileTypography.caption,
+    fontWeight: '600',
+    letterSpacing: 1,
   },
-  restrictedRoleValue: {
-    fontSize: FontSize.md,
-    fontWeight: '800',
-    color: Colors.accent.primary,
-    marginBottom: Spacing.xs,
+  referenceValue: {
+    color: LightColors.text,
+    ...MobileTypography.body,
+    fontWeight: '700',
+    marginTop: 10,
   },
-  restrictedRoleHint: {
-    fontSize: FontSize.xs,
-    color: Colors.text.secondary,
-    textAlign: 'center',
-    lineHeight: 17,
+  pendingBadge: {
+    borderRadius: 8,
+    backgroundColor: '#FFF2D4',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 14,
   },
-  restrictedBackBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: Colors.accent.primary,
-    paddingHorizontal: Spacing.xxl,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-  },
-  restrictedBackBtnText: {
-    fontSize: FontSize.sm,
-    fontWeight: '800',
-    color: '#080C14',
-  },
+  pendingText: { color: '#946000', ...MobileTypography.badge, fontWeight: '600' },
+  secondaryButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  secondaryText: { color: LightColors.primary, ...MobileTypography.button, fontWeight: '600' },
 });

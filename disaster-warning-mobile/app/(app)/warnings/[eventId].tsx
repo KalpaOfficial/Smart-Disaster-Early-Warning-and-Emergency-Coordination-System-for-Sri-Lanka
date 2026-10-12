@@ -6,9 +6,9 @@
  * - Affected Districts & River Basins
  * - Event Status
  * - Verified Ground Report Information & Count
- * Provides a clear "ISSUE WARNING" primary action button triggering the UC01 Warning Composer.
+ * Provides a clear "Issue warning" primary action button triggering the UC01 Warning Composer.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -18,15 +18,23 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
 import { ScreenContainer } from '@/components/ScreenContainer';
-import { Card } from '@/components/Card';
-import { Button } from '@/components/Button';
+import {
+  OfficerCard as Card,
+  OfficerButton as Button,
+  OfficerHero,
+  officerScreenStyle,
+  officerShellStyle,
+} from '@/components/OfficerUi';
+import { FormModal } from '@/components/FormModal';
+import { ReportDetailView } from '@/components/ReportDetailView';
 import { EmptyState } from '@/components/EmptyState';
 import { MobileNavBar } from '@/components/MobileNavBar';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/colors';
+import { Spacing, BorderRadius } from '@/constants/colors';
+import { OfficerColors as Colors, OfficerFontSize as FontSize } from '@/components/OfficerUi';
 import { getHazardEvent } from '@/services/hazardEventService';
 import { getGroundReportsForEvent, getWarningsForEvent } from '@/services/warningService';
 import type { HazardEvent } from '@/types/resources';
@@ -45,6 +53,8 @@ export default function HazardEventDetailsScreen() {
   const [groundReports, setGroundReports] = useState<VerifiedGroundReportStub[]>([]);
   const [existingWarnings, setExistingWarnings] = useState<HazardWarning[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAllWarnings, setShowAllWarnings] = useState(false);
+  const [selectedReport, setSelectedReport] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Fetch Event by Firestore ID, Ground Reports & Issued Warnings
@@ -74,13 +84,15 @@ export default function HazardEventDetailsScreen() {
     }
   }, [eventId]);
 
-  useEffect(() => {
-    fetchEventDetails();
-  }, [fetchEventDetails]);
+  useFocusEffect(
+    useCallback(() => {
+      void fetchEventDetails();
+    }, [fetchEventDetails])
+  );
 
   // Navigate to Warning Composer with selected event
   const handleIssueWarning = () => {
-    if (!event) return;
+    if (!event || event.status !== 'active') return;
     router.push({
       pathname: '/(app)/warnings/compose',
       params: { eventId: event.id },
@@ -88,25 +100,25 @@ export default function HazardEventDetailsScreen() {
   };
 
   return (
-    <ScreenContainer>
+    <ScreenContainer style={officerScreenStyle} contentStyle={officerShellStyle}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Navigation Header */}
-        <View style={styles.navHeader}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-            <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
-          </TouchableOpacity>
-          <View style={styles.navTitleBox}>
-            <Text style={styles.navPill}>EVENT TELEMETRY</Text>
-            <Text style={styles.navTitle}>Hazard Event Details</Text>
-          </View>
-        </View>
+        <OfficerHero
+          title="Hazard event"
+          description="Review affected areas, verified reports and issued warnings."
+          caption="DMC Officer"
+          icon="notifications-outline"
+          onBack={() => router.back()}
+        />
 
         {/* Loading State */}
         {loading ? (
           <Card style={styles.stateCard}>
             <ActivityIndicator size="large" color={Colors.accent.primary} />
             <Text style={styles.stateTitle}>Retrieving Hazard Event Details...</Text>
-            <Text style={styles.stateDesc}>Fetching document from Cloud Firestore `hazardEvents/{eventId}`.</Text>
+            <Text style={styles.stateDesc}>
+              Fetching document from Cloud Firestore `hazardEvents/{eventId}`.
+            </Text>
           </Card>
         ) : error ? (
           /* Error State */
@@ -114,11 +126,18 @@ export default function HazardEventDetailsScreen() {
             <Ionicons name="cloud-offline" size={36} color={Colors.danger} />
             <Text style={styles.errorTitle}>Firestore Fetch Error</Text>
             <Text style={styles.errorDesc}>{error}</Text>
-            <Button title="Retry Fetch" variant="danger" size="sm" onPress={fetchEventDetails} style={styles.retryBtn} />
+            <Button
+              title="Retry Fetch"
+              variant="danger"
+              size="sm"
+              onPress={fetchEventDetails}
+              style={styles.retryBtn}
+            />
           </Card>
         ) : !event ? (
           /* Not Found State */
           <EmptyState
+            appearance="light"
             iconName="alert-circle-outline"
             title="Hazard Event Not Found"
             message={`No active hazard event document was found in Cloud Firestore matching ID "${eventId}".`}
@@ -130,7 +149,7 @@ export default function HazardEventDetailsScreen() {
           <>
             {/* Hero Event Banner */}
             <LinearGradient
-              colors={['#1E1B4B', '#0F172A']}
+              colors={['#EAF2FF', '#F8FAFD']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.heroBanner}
@@ -138,7 +157,10 @@ export default function HazardEventDetailsScreen() {
               <View style={styles.heroHeaderRow}>
                 <View style={styles.beaconPill}>
                   <View style={styles.beaconDot} />
-                  <Text style={styles.beaconText}>{event.hazardType.toUpperCase()} EVENT • OPEN</Text>
+                  <Text style={styles.beaconText}>
+                    {event.hazardType.toUpperCase()} EVENT •{' '}
+                    {event.status === 'active' ? 'OPEN' : 'CLOSED'}
+                  </Text>
                 </View>
                 <View style={styles.statusChip}>
                   <Text style={styles.statusChipText}>{event.status.toUpperCase()}</Text>
@@ -168,7 +190,9 @@ export default function HazardEventDetailsScreen() {
 
                 <View style={styles.metricItem}>
                   <Text style={styles.metricLabel}>GROUND REPORTS</Text>
-                  <Text style={[styles.metricVal, { color: Colors.success }]}>{groundReports.length} Verified</Text>
+                  <Text style={[styles.metricVal, { color: Colors.success }]}>
+                    {groundReports.length} Verified
+                  </Text>
                 </View>
               </View>
             </LinearGradient>
@@ -181,9 +205,11 @@ export default function HazardEventDetailsScreen() {
               </View>
 
               <View style={styles.areaGroup}>
-                <Text style={styles.areaGroupLabel}>AFFECTED DISTRICTS ({event.affectedDistricts.length}):</Text>
+                <Text style={styles.areaGroupLabel}>
+                  AFFECTED DISTRICTS ({event.affectedDistricts.length}):
+                </Text>
                 <View style={styles.chipsWrap}>
-                  {event.affectedDistricts.map((d) => (
+                  {event.affectedDistricts.map(d => (
                     <View key={d} style={styles.districtChip}>
                       <Ionicons name="location" size={12} color={Colors.accent.primary} />
                       <Text style={styles.districtChipText}>{d}</Text>
@@ -198,9 +224,9 @@ export default function HazardEventDetailsScreen() {
                     AFFECTED RIVER BASINS ({event.affectedRiverBasins.length}):
                   </Text>
                   <View style={styles.chipsWrap}>
-                    {event.affectedRiverBasins.map((basin) => (
+                    {event.affectedRiverBasins.map(basin => (
                       <View key={basin} style={styles.basinChip}>
-                        <Ionicons name="water" size={12} color="#38BDF8" />
+                        <Ionicons name="water" size={12} color="#0066FF" />
                         <Text style={styles.basinChipText}>{basin}</Text>
                       </View>
                     ))}
@@ -213,44 +239,51 @@ export default function HazardEventDetailsScreen() {
             <Card style={styles.cardSection}>
               <View style={styles.cardHeaderRow}>
                 <Ionicons name="shield-checkmark" size={18} color={Colors.success} />
-                <Text style={styles.cardSectionTitle}>VERIFIED GROUND REPORTS ({groundReports.length})</Text>
+                <Text style={styles.cardSectionTitle}>
+                  Verified ground reports ({groundReports.length})
+                </Text>
               </View>
 
               {groundReports.length > 0 ? (
-                groundReports.map((report) => (
+                groundReports.map(report => (
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`View report: ${report.referenceNumber || report.id}`}
                     key={report.id}
                     style={styles.groundReportCard}
-                    activeOpacity={0.75}
-                    onPress={() => router.push(`/(app)/reports/${report.id}` as never)}
+                    onPress={() => setSelectedReport(report.id)}
                   >
                     <View style={styles.reportHeader}>
-                      <View style={styles.verifiedTag}>
-                        <Ionicons name="checkmark-circle" size={12} color={Colors.success} />
-                        <Text style={styles.verifiedTagText}>
-                          {report.referenceNumber ? `#${report.referenceNumber} • ` : ''}VERIFIED BY {report.verifiedBy}
-                        </Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Text style={styles.reportTime}>
-                          {new Date(report.reportedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </Text>
-                        <Ionicons name="chevron-forward" size={14} color={Colors.text.tertiary} />
-                      </View>
+                      <Text style={styles.reportReference}>
+                        {report.referenceNumber || 'Verified report'}
+                      </Text>
+                      <Ionicons name="chevron-forward" size={18} color={Colors.accent.primary} />
                     </View>
-
-                    <Text style={styles.reportLocation}>📍 {report.locationName} ({report.district})</Text>
-                    <Text style={styles.reportDescription}>{report.description}</Text>
+                    <Text style={styles.reportLocation}>{report.locationName}</Text>
+                    <Text style={styles.reportDescription}>
+                      {report.district} · {new Date(report.reportedAt).toLocaleDateString()}
+                    </Text>
+                    <Text style={styles.reportDescription} numberOfLines={2}>
+                      {report.description}
+                    </Text>
+                    <Text style={styles.viewReportLabel}>View report details</Text>
                   </TouchableOpacity>
                 ))
               ) : (
                 <View style={styles.noReportsBox}>
                   <View style={styles.noReportsHeader}>
-                    <Ionicons name="information-circle-outline" size={18} color={Colors.accent.primary} />
-                    <Text style={styles.noReportsTitle}>No verified ground reports available for this hazard event.</Text>
+                    <Ionicons
+                      name="information-circle-outline"
+                      size={18}
+                      color={Colors.accent.primary}
+                    />
+                    <Text style={styles.noReportsTitle}>
+                      No verified ground reports available for this hazard event.
+                    </Text>
                   </View>
                   <Text style={styles.noReportsText}>
-                    Standard Operating Procedure: The absence of citizen ground observations does not indicate the absence of hazard conditions. The Duty Officer may continue to issue an official warning if regional sensor telemetry, river gauges, and meteorological forecasts warrant action.
+                    You can still issue a warning using official monitoring information. Review the
+                    event details before deciding.
                   </Text>
                 </View>
               )}
@@ -261,114 +294,106 @@ export default function HazardEventDetailsScreen() {
               <Card style={styles.cardSection}>
                 <View style={styles.cardHeaderRow}>
                   <Ionicons name="notifications" size={18} color="#F59E0B" />
-                  <Text style={styles.cardSectionTitle}>ISSUED WARNINGS ({existingWarnings.length})</Text>
+                  <Text style={styles.cardSectionTitle}>
+                    Issued warnings ({existingWarnings.length})
+                  </Text>
                 </View>
 
-                {existingWarnings.map((warn) => (
+                <Text style={styles.reportDescription}>
+                  Most recent first. Open delivery details to see whether each alert reached its
+                  audience.
+                </Text>
+                {(showAllWarnings ? existingWarnings : existingWarnings.slice(0, 3)).map(warn => (
                   <View key={warn.id} style={styles.existingWarningCard}>
-                    <View style={styles.existingWarningHeader}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                        <View
-                          style={[
-                            styles.severityIndicatorDot,
-                            {
-                              backgroundColor:
-                                warn.severity === 'evacuation'
-                                  ? Colors.danger
-                                  : warn.severity === 'warning'
-                                  ? '#F59E0B'
-                                  : '#FCD34D',
-                            },
-                          ]}
-                        />
-                        <Text style={styles.existingWarningHeadline} numberOfLines={1}>
-                          {warn.headline}
-                        </Text>
-                      </View>
-                      <View
+                    <View style={styles.reportHeader}>
+                      <Text
                         style={[
-                          styles.existingWarningSeverityBadge,
+                          styles.severityText,
                           {
-                            backgroundColor:
-                              warn.severity === 'evacuation'
-                                ? 'rgba(239, 68, 68, 0.2)'
-                                : warn.severity === 'warning'
-                                ? 'rgba(245, 158, 11, 0.2)'
-                                : 'rgba(234, 179, 8, 0.2)',
+                            color: warn.severity === 'evacuation' ? Colors.danger : Colors.warning,
                           },
                         ]}
                       >
-                        <Text
-                          style={[
-                            styles.existingWarningSeverityText,
-                            {
-                              color:
-                                warn.severity === 'evacuation'
-                                  ? Colors.danger
-                                  : warn.severity === 'warning'
-                                  ? '#F59E0B'
-                                  : '#FCD34D',
-                            },
-                          ]}
-                        >
-                          {warn.severity.toUpperCase()}
-                        </Text>
-                      </View>
+                        {warn.severity === 'evacuation'
+                          ? 'Evacuation order'
+                          : warn.severity === 'advisory'
+                            ? 'Advisory'
+                            : 'Warning'}
+                      </Text>
+                      <Text style={styles.reportTime}>
+                        {new Date(warn.createdAt).toLocaleDateString()}
+                      </Text>
                     </View>
-
-                    {warn.previousWarningId && (
-                      <View style={styles.escalatedNoticeRow}>
-                        <Ionicons name="trending-up" size={12} color="#F59E0B" />
-                        <Text style={styles.escalatedNoticeText}>
-                          Escalated from #{warn.previousWarningId.slice(-6).toUpperCase()}
-                        </Text>
-                      </View>
-                    )}
-
-                    <Text style={styles.existingWarningMeta}>
-                      Target: {warn.targetAreas.join(', ')} • {warn.recipientCount.toLocaleString()} recipients
+                    <Text style={styles.warningHeadline}>{warn.headline}</Text>
+                    <Text style={styles.reportDescription}>{warn.targetAreas.join(', ')}</Text>
+                    <Text style={styles.reportDescription}>
+                      {warn.recipientCount} registered recipients ·{' '}
+                      {warn.status === 'delivered'
+                        ? 'Sent'
+                        : warn.status === 'partially_failed'
+                          ? 'Some deliveries failed'
+                          : warn.status === 'failed'
+                            ? 'Delivery failed'
+                            : warn.status.replace(/_/g, ' ')}
                     </Text>
-
-                    <View style={styles.existingWarningBtnRow}>
+                    {warn.previousWarningId && (
+                      <Text style={styles.reportTime}>Updates an earlier warning</Text>
+                    )}
+                    <View style={styles.warningActions}>
                       <Button
-                        title="Summary"
+                        title="View delivery details"
                         variant="secondary"
-                        size="sm"
-                        icon={<Ionicons name="stats-chart-outline" size={14} color="#FFFFFF" />}
                         onPress={() =>
                           router.push({
                             pathname: '/(app)/warnings/summary',
                             params: { warningId: warn.id, eventId },
                           } as never)
                         }
-                        style={{ flex: 1 }}
                       />
-                      {isDmcOfficer && (
+                      {isDmcOfficer && event.status === 'active' && (
                         <Button
-                          title="Escalate"
-                          variant="danger"
-                          size="sm"
-                          icon={<Ionicons name="trending-up-outline" size={14} color="#FFFFFF" />}
+                          title={
+                            warn.severity === 'evacuation' ? 'Update warning' : 'Raise alert level'
+                          }
+                          variant="outline"
                           onPress={() =>
                             router.push({
                               pathname: '/(app)/warnings/compose',
                               params: { eventId, escalateWarningId: warn.id },
                             } as never)
                           }
-                          style={{ flex: 1 }}
                         />
                       )}
                     </View>
                   </View>
                 ))}
+                {existingWarnings.length > 3 && (
+                  <Button
+                    title={
+                      showAllWarnings
+                        ? 'Show recent warnings'
+                        : `View all ${existingWarnings.length} warnings`
+                    }
+                    variant="secondary"
+                    onPress={() => setShowAllWarnings(value => !value)}
+                  />
+                )}
               </Card>
             )}
 
-            {/* Clear "ISSUE WARNING" Primary CTA Action */}
+            {/* Clear "Issue warning" Primary CTA Action */}
             <View style={styles.actionSection}>
-              {isDmcOfficer ? (
+              {isDmcOfficer && (
                 <Button
-                  title="ISSUE WARNING"
+                  title="Manage hazard events"
+                  variant="secondary"
+                  onPress={() => router.push('/(app)/warnings/events' as never)}
+                  style={{ marginBottom: 12 }}
+                />
+              )}
+              {isDmcOfficer && event.status === 'active' ? (
+                <Button
+                  title="Issue warning"
                   variant="primary"
                   icon={<Ionicons name="megaphone-outline" size={20} color="#FFFFFF" />}
                   onPress={handleIssueWarning}
@@ -376,9 +401,15 @@ export default function HazardEventDetailsScreen() {
                 />
               ) : (
                 <View style={styles.nonOfficerNotice}>
-                  <Ionicons name="information-circle-outline" size={16} color={Colors.text.tertiary} />
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={16}
+                    color={Colors.text.tertiary}
+                  />
                   <Text style={styles.nonOfficerText}>
-                    Warning issuance is restricted to DMC Duty Officers. You are viewing event telemetry.
+                    {event.status === 'closed'
+                      ? 'This event is closed. Its reports and warning history remain available.'
+                      : 'Only DMC officers can issue warnings. You can view the event details.'}
                   </Text>
                 </View>
               )}
@@ -387,12 +418,50 @@ export default function HazardEventDetailsScreen() {
         )}
       </ScrollView>
 
-      <MobileNavBar />
+      <FormModal
+        appearance="light"
+        visible={Boolean(selectedReport)}
+        title="Report details"
+        scrollable={false}
+        onClose={() => setSelectedReport(null)}
+      >
+        {selectedReport && (
+          <ReportDetailView
+            reportId={selectedReport}
+            embedded
+            onClose={() => setSelectedReport(null)}
+          />
+        )}
+      </FormModal>
+      <MobileNavBar appearance="light" />
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
+  reportReference: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: Colors.success,
+    fontWeight: '600',
+    flex: 1,
+  },
+  viewReportLabel: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: Colors.accent.primary,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  severityText: { fontSize: 14, lineHeight: 22, fontWeight: '600', flex: 1 },
+  warningHeadline: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: Colors.text.primary,
+    fontWeight: '700',
+    marginVertical: 8,
+  },
+  warningActions: { gap: 10, marginTop: 12 },
   scrollContent: {
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.sm,
@@ -405,14 +474,14 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   backBtn: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: 20,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F8FAFD',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
   },
   navTitleBox: {
     flex: 1,
@@ -440,6 +509,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: Spacing.md,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   beaconPill: {
     flexDirection: 'row',
@@ -461,7 +532,7 @@ const styles = StyleSheet.create({
   beaconText: {
     fontSize: FontSize.micro,
     fontWeight: '800',
-    color: '#FCA5A5',
+    color: '#B42332',
     letterSpacing: 0.5,
   },
   statusChip: {
@@ -480,7 +551,7 @@ const styles = StyleSheet.create({
   eventTitle: {
     fontSize: FontSize.xl,
     fontWeight: '900',
-    color: '#FFFFFF',
+    color: Colors.text.primary,
     marginBottom: Spacing.xs,
   },
   eventDesc: {
@@ -491,32 +562,39 @@ const styles = StyleSheet.create({
   },
   metricsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
     alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    backgroundColor: '#F8FAFD',
     borderRadius: BorderRadius.lg,
     padding: Spacing.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
   },
   metricItem: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 90,
+    minWidth: 0,
     alignItems: 'center',
   },
   metricLabel: {
     fontSize: FontSize.micro,
     color: Colors.text.tertiary,
     fontWeight: '700',
+    textAlign: 'center',
   },
   metricVal: {
     fontSize: FontSize.xs,
     fontWeight: '900',
-    color: '#FFF',
+    color: Colors.text.primary,
     marginTop: 2,
+    textAlign: 'center',
   },
   metricDivider: {
+    display: 'none',
     width: 1,
     height: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: '#DFE7F1',
   },
   cardSection: {
     marginBottom: Spacing.xl,
@@ -528,10 +606,10 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   cardSectionTitle: {
-    fontSize: FontSize.micro,
+    fontSize: FontSize.lg,
     fontWeight: '800',
     color: Colors.text.tertiary,
-    letterSpacing: 0.8,
+    letterSpacing: 0,
   },
   areaGroup: {
     marginBottom: Spacing.sm,
@@ -576,22 +654,23 @@ const styles = StyleSheet.create({
   },
   basinChipText: {
     fontSize: FontSize.xs,
-    color: '#38BDF8',
+    color: '#0066FF',
     fontWeight: '800',
   },
   groundReportCard: {
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F8FAFD',
     padding: Spacing.md,
     borderRadius: BorderRadius.md,
     marginBottom: Spacing.xs,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
   },
   reportHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 4,
+    flexWrap: 'wrap',
   },
   verifiedTag: {
     flexDirection: 'row',
@@ -610,21 +689,21 @@ const styles = StyleSheet.create({
   reportLocation: {
     fontSize: FontSize.xs,
     fontWeight: '800',
-    color: '#FFF',
+    color: Colors.text.primary,
     marginTop: 2,
   },
   reportDescription: {
     fontSize: FontSize.xs,
     color: Colors.text.secondary,
-    lineHeight: 18,
+    lineHeight: 22,
     marginTop: 4,
   },
   noReportsBox: {
     padding: Spacing.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backgroundColor: '#DFE7F1',
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
     gap: Spacing.xs,
   },
   noReportsHeader: {
@@ -641,7 +720,7 @@ const styles = StyleSheet.create({
   noReportsText: {
     fontSize: FontSize.xs,
     color: Colors.text.tertiary,
-    lineHeight: 18,
+    lineHeight: 22,
   },
   actionSection: {
     marginTop: Spacing.sm,
@@ -655,10 +734,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.xs,
     padding: Spacing.md,
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    backgroundColor: '#F8FAFD',
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
   },
   nonOfficerText: {
     fontSize: FontSize.xs,
@@ -706,11 +785,11 @@ const styles = StyleSheet.create({
     minWidth: 160,
   },
   existingWarningCard: {
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F8FAFD',
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
     marginBottom: Spacing.sm,
   },
   existingWarningHeader: {

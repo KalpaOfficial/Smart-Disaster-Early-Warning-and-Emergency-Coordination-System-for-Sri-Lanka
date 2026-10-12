@@ -2,14 +2,14 @@
  * Resources group layout — stack navigator for resource coordination screens.
  */
 import { Stack } from 'expo-router';
-import { Colors } from '@/constants/colors';
+import { LightColors } from '@/constants/colors';
 
 export default function ResourcesLayout() {
   return (
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: Colors.bg.primary },
+        contentStyle: { backgroundColor: LightColors.background },
         animation: 'slide_from_right',
       }}
     >

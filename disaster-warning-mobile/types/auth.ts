@@ -34,10 +34,9 @@ export interface SignupData {
   email: string;
   password: string;
   confirmPassword: string;
-  role: UserRole;
-  district?: string;
+  role: 'citizen';
+  district: string;
   phone?: string;
-  organisation?: string;
 }
 
 export interface AuthContextType {

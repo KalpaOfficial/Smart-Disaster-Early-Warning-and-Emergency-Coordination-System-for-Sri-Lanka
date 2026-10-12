@@ -31,6 +31,14 @@ service cloud.firestore {
       );
     }
 
+    function isResourceCoordinator() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'district_officer' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         getUserData().role == 'district_officer')
+      );
+    }
+
     // ==========================================
     // UC01: HAZARD WARNINGS COLLECTION
     // ==========================================
@@ -91,17 +99,27 @@ service cloud.firestore {
         isDmcOfficer()
       );
 
-      // Citizens and volunteers can create reports linked to their own account (starts as pending_verification)
+      // Community submitters can only create pending reports owned by their account.
       allow create: if isAuthenticated() && (
-        request.resource.data.submitterId == request.auth.uid ||
-        request.resource.data.userId == request.auth.uid
+        (request.resource.data.submitterId == request.auth.uid &&
+         getUserData().role in ['citizen', 'volunteer'] &&
+         request.resource.data.submitterRole == getUserData().role &&
+         request.resource.data.status == 'pending_verification' &&
+         request.resource.data.verifiedBy == null &&
+         request.resource.data.hazardEventId == null) ||
+        (isDmcOfficer() && request.resource.data.isDemo == true)
       );
 
       // DMC Officers can verify/reject/update reports; submitters can reply to info requests
       allow update: if isAuthenticated() && (
         isDmcOfficer() ||
-        resource.data.submitterId == request.auth.uid ||
-        resource.data.userId == request.auth.uid
+        (resource.data.submitterId == request.auth.uid &&
+         resource.data.status == 'info_requested' &&
+         request.resource.data.status == 'pending_verification' &&
+         request.resource.data.additionalInfo is string &&
+         request.resource.data.additionalInfo.size() > 0 &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+           ['additionalInfo', 'status', 'updatedAt']))
       );
 
       allow delete: if isDmcOfficer();
@@ -114,8 +132,10 @@ service cloud.firestore {
       // Authenticated users can read user records (required for recipient resolution & role checks)
       allow read: if isAuthenticated();
 
-      // Users can manage their own profile
-      allow create, update: if isOwner(userId);
+      // Public registration creates citizens only. Other roles are provisioned by trusted admins.
+      allow create: if isOwner(userId) && request.resource.data.role == 'citizen';
+      // Profile edits cannot promote or otherwise change an account's role.
+      allow update: if isOwner(userId) && request.resource.data.role == resource.data.role;
       allow delete: if false; // User deletion restricted
     }
 
@@ -124,9 +144,41 @@ service cloud.firestore {
     // ==========================================
     match /postEventReports/{reportId} {
       allow read, write: if isDmcOfficer();
+      match /exports/{format} {
+        allow read, write: if isDmcOfficer();
+      }
     }
     match /reports/{reportId} {
       allow read, write: if isDmcOfficer();
+    }
+
+    match /donorDistributions/{recordId} {
+      allow read, write: if isDmcOfficer();
+    }
+    match /donorOrganisations/{donorId} {
+      allow read, write: if isDmcOfficer();
+    }
+
+    // UC03: operational resources and their distribution ledger.
+    match /shelters/{shelterId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isResourceCoordinator();
+      allow delete: if isResourceCoordinator();
+    }
+    match /rescueTeams/{teamId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isResourceCoordinator();
+      allow delete: if isResourceCoordinator();
+    }
+    match /reliefSupplies/{supplyId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isResourceCoordinator();
+      allow delete: if isResourceCoordinator();
+    }
+    match /distributions/{distributionId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isResourceCoordinator();
+      allow delete: if isResourceCoordinator();
     }
   }
 }

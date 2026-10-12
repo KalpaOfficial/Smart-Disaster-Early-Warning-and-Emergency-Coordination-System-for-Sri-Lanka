@@ -3,7 +3,7 @@
  */
 import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
-import { Colors } from '@/constants/colors';
+import { LightColors } from '@/constants/colors';
 import { startAutoSync, stopAutoSync } from '@/services/offlineSyncManager';
 
 export default function AppLayout() {
@@ -19,7 +19,7 @@ export default function AppLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: Colors.bg.primary },
+        contentStyle: { backgroundColor: LightColors.background },
         animation: 'slide_from_right',
       }}
     >

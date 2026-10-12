@@ -1,3 +1,8 @@
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+jest.mock('@/services/resourceAuthorization', () => ({
+  requireDistrictOfficer: jest.fn(async () => 'district-officer'),
+  requireActiveResourceEvent: jest.fn(async () => {}),
+}));
 /**
  * Unit Tests for UC03 Relief Supply Distribution & Inventory Invariant Rules.
  *
@@ -16,6 +21,7 @@ describe('UC03: Relief Supply Distribution Ledger & Invariant Safeguards', () =>
 
   beforeEach(() => {
     jest.clearAllMocks();
+    installResourceFirestore({});
   });
 
   describe('Sequential Distribution Reconciliation', () => {
@@ -30,7 +36,6 @@ describe('UC03: Relief Supply Distribution Ledger & Invariant Safeguards', () =>
           unit: 'packs',
         }),
       });
-      (addDoc as jest.Mock).mockResolvedValueOnce({ id: 'dist-01' });
 
       await distributeSupply(
         {
@@ -43,12 +48,12 @@ describe('UC03: Relief Supply Distribution Ledger & Invariant Safeguards', () =>
           details: 'Convoy Alpha',
         },
         'officer-01',
-        'event-monsoon-2026',
+        'event-monsoon-2026'
       );
 
       expect(updateDoc).toHaveBeenLastCalledWith(
         expect.anything(),
-        expect.objectContaining({ remainingQuantity: 7000 }),
+        expect.objectContaining({ remainingQuantity: 7000 })
       );
 
       // Dispatch 2: 4,500 packs out of remaining 7,000
@@ -61,7 +66,6 @@ describe('UC03: Relief Supply Distribution Ledger & Invariant Safeguards', () =>
           unit: 'packs',
         }),
       });
-      (addDoc as jest.Mock).mockResolvedValueOnce({ id: 'dist-02' });
 
       await distributeSupply(
         {
@@ -74,12 +78,12 @@ describe('UC03: Relief Supply Distribution Ledger & Invariant Safeguards', () =>
           details: 'Convoy Bravo',
         },
         'officer-01',
-        'event-monsoon-2026',
+        'event-monsoon-2026'
       );
 
       expect(updateDoc).toHaveBeenLastCalledWith(
         expect.anything(),
-        expect.objectContaining({ remainingQuantity: 2500 }),
+        expect.objectContaining({ remainingQuantity: 2500 })
       );
 
       // Dispatch 3: Remaining 2,500 packs down to 0
@@ -92,7 +96,6 @@ describe('UC03: Relief Supply Distribution Ledger & Invariant Safeguards', () =>
           unit: 'packs',
         }),
       });
-      (addDoc as jest.Mock).mockResolvedValueOnce({ id: 'dist-03' });
 
       await distributeSupply(
         {
@@ -105,12 +108,12 @@ describe('UC03: Relief Supply Distribution Ledger & Invariant Safeguards', () =>
           details: 'Convoy Charlie Final',
         },
         'officer-01',
-        'event-monsoon-2026',
+        'event-monsoon-2026'
       );
 
       expect(updateDoc).toHaveBeenLastCalledWith(
         expect.anything(),
-        expect.objectContaining({ remainingQuantity: 0 }),
+        expect.objectContaining({ remainingQuantity: 0 })
       );
     });
   });
@@ -137,9 +140,9 @@ describe('UC03: Relief Supply Distribution Ledger & Invariant Safeguards', () =>
         details: 'Attempt on depleted inventory',
       };
 
-      await expect(
-        distributeSupply(request, 'officer-01', 'event-monsoon-2026'),
-      ).rejects.toThrow('Insufficient supplies. Requested: 100, Available: 0');
+      await expect(distributeSupply(request, 'officer-01', 'event-monsoon-2026')).rejects.toThrow(
+        'Insufficient supplies. Requested: 100, Available: 0'
+      );
 
       expect(addDoc).not.toHaveBeenCalled();
       expect(updateDoc).not.toHaveBeenCalled();
@@ -166,9 +169,9 @@ describe('UC03: Relief Supply Distribution Ledger & Invariant Safeguards', () =>
         details: 'Tents request',
       };
 
-      await expect(
-        distributeSupply(request, 'officer-01', 'event-monsoon-2026'),
-      ).rejects.toThrow('Insufficient supplies. Requested: 11, Available: 10');
+      await expect(distributeSupply(request, 'officer-01', 'event-monsoon-2026')).rejects.toThrow(
+        'Insufficient supplies. Requested: 11, Available: 10'
+      );
 
       expect(addDoc).not.toHaveBeenCalled();
       expect(updateDoc).not.toHaveBeenCalled();
@@ -186,7 +189,6 @@ describe('UC03: Relief Supply Distribution Ledger & Invariant Safeguards', () =>
           unit: 'sachets',
         }),
       });
-      (addDoc as jest.Mock).mockResolvedValueOnce({ id: 'dist-ors-01' });
 
       await distributeSupply(
         {
@@ -199,12 +201,12 @@ describe('UC03: Relief Supply Distribution Ledger & Invariant Safeguards', () =>
           details: 'Dispatched with medical team',
         },
         'health-officer-02',
-        'event-monsoon-2026',
+        'event-monsoon-2026'
       );
 
       expect(updateDoc).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ remainingQuantity: 2500 }),
+        expect.objectContaining({ remainingQuantity: 2500 })
       );
     });
   });

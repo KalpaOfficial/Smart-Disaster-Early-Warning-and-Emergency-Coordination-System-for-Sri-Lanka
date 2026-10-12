@@ -3,12 +3,7 @@
  * Listens to Firebase Auth state changes and hydrates user profile from Cloud Firestore.
  * No mock data or local storage fallbacks.
  */
-import React, {
-  createContext,
-  useReducer,
-  useEffect,
-  useCallback,
-} from 'react';
+import React, { createContext, useReducer, useEffect, useCallback, useRef } from 'react';
 import {
   signIn,
   signUp,
@@ -17,13 +12,7 @@ import {
   onAuthChanged,
   getAuthErrorMessage,
 } from '@/services/authService';
-import type {
-  AuthState,
-  AuthContextType,
-  LoginCredentials,
-  SignupData,
-  User,
-} from '@/types/auth';
+import type { AuthState, AuthContextType, LoginCredentials, SignupData, User } from '@/types/auth';
 
 // --- Action Types ---
 
@@ -74,38 +63,24 @@ export const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(authReducer, initialState);
+  const authActionInProgress = useRef(false);
 
   // Listen directly for Firebase Auth state changes
   useEffect(() => {
     let isMounted = true;
+    let authRevision = 0;
 
-    const unsubscribe = onAuthChanged(async (firebaseUser) => {
+    const unsubscribe = onAuthChanged(async firebaseUser => {
       if (!isMounted) return;
+      const revision = ++authRevision;
+      if (authActionInProgress.current) return;
       if (firebaseUser) {
-        // Fast instant state dispatch so the app unlocks immediately without waiting on Firestore
-        const baseUser: User = {
-          id: firebaseUser.uid,
-          email: firebaseUser.email || '',
-          fullName: firebaseUser.displayName || 'Disaster Officer',
-          role: 'district_officer',
-          district: 'Colombo',
-          phone: '',
-          organisation: 'Disaster Management Centre',
-          createdAt: new Date().toISOString(),
-        };
-
-        if (isMounted) {
-          dispatch({ type: 'SET_USER', payload: baseUser });
+        // Restore the persisted role before granting access; never assume an officer role.
+        dispatch({ type: 'SET_LOADING', payload: true });
+        const profile = await getUserProfile(firebaseUser.uid);
+        if (isMounted && revision === authRevision) {
+          dispatch({ type: 'SET_USER', payload: profile });
         }
-
-        // Hydrate full Firestore profile in background
-        getUserProfile(firebaseUser.uid)
-          .then((profile) => {
-            if (isMounted && profile) {
-              dispatch({ type: 'SET_USER', payload: profile });
-            }
-          })
-          .catch(() => {});
       } else {
         if (isMounted) dispatch({ type: 'SET_USER', payload: null });
       }
@@ -118,6 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(async (credentials: LoginCredentials) => {
+    authActionInProgress.current = true;
     dispatch({ type: 'SET_LOADING', payload: true });
     try {
       const user = await signIn(credentials);
@@ -125,10 +101,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       dispatch({ type: 'SET_LOADING', payload: false });
       throw new Error(getAuthErrorMessage(error));
+    } finally {
+      authActionInProgress.current = false;
     }
   }, []);
 
   const signup = useCallback(async (data: SignupData) => {
+    authActionInProgress.current = true;
     dispatch({ type: 'SET_LOADING', payload: true });
     try {
       const user = await signUp(data);
@@ -136,22 +115,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       dispatch({ type: 'SET_LOADING', payload: false });
       throw new Error(getAuthErrorMessage(error));
+    } finally {
+      authActionInProgress.current = false;
     }
   }, []);
 
   const logout = useCallback(async () => {
     try {
       await signOut();
-    } catch (error) {
-      console.warn('Firebase sign out warning:', error);
-    } finally {
       dispatch({ type: 'LOGOUT' });
+    } catch (error) {
+      throw new Error(getAuthErrorMessage(error));
     }
   }, []);
 
   return (
-    <AuthContext.Provider value={{ state, login, signup, logout }}>
-      {children}
-    </AuthContext.Provider>
+    <AuthContext.Provider value={{ state, login, signup, logout }}>{children}</AuthContext.Provider>
   );
 }

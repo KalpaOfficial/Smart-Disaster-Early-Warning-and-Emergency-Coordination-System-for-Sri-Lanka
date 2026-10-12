@@ -1,24 +1,3 @@
-/**
- * Post-Event Response Report Service — Implements UC04:
- * Generate Post-Event Response Report.
- *
- * Requirements from guide.md Section 5:
- * - Closed hazard event selection (Steps 64–65)
- * - 4 statistical metrics:
- *   1. Alert Timeline
- *   2. Citizens Reached
- *   3. Shelter Occupancy Over Time
- *   4. Resource Distribution by District (consuming UC03 distribution records)
- * - Date range & district filtering (Step 68)
- * - Tabular & chart preparation (Steps 72–74)
- * - Export Report to PDF or CSV (Steps 76–80)
- * - Donor Organisation distribution audit trail (Steps 81–83 & Alternate Flow)
- * - Exception Flows:
- *   - Event Not Closed
- *   - No Records for Selected Criteria
- *   - Aggregation Timeout & Partial Fault Tolerance
- *   - Export Generation Failure
- */
 import {
   collection,
   query,
@@ -27,10 +6,11 @@ import {
   doc,
   getDoc,
   addDoc,
-  updateDoc,
+  writeBatch,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { requireDmcActor } from './workflowAuthorization';
 import type { HazardEvent } from '@/types/resources';
 import type {
   PostEventReport,
@@ -38,308 +18,303 @@ import type {
   ReportMetricType,
   ExportFormat,
   DonorDistributionRecord,
-  AlertTimelineMetric,
-  CitizenReachMetric,
-  ShelterOccupancyMetric,
-  ResourceDistributionMetric,
+  RegisteredDonor,
+  ReportExportArtifact,
 } from '@/types/postEventReport';
 import { SRI_LANKAN_DISTRICTS } from '@/constants/districts';
+import {
+  aggregatePostEventMetric,
+  REPORT_METRICS,
+  reportDate,
+  reportRangeBoundary,
+  type ReportRecord,
+} from '@/utils/postEventMetrics';
+import { buildReportExport } from '@/utils/postEventExport';
 
-const REPORTS_COLLECTION = 'postEventReports';
-const EVENTS_COLLECTION = 'hazardEvents';
-const DONOR_DISTRIBUTIONS_COLLECTION = 'donorDistributions';
-
-/**
- * Retrieve completed / closed hazard events available for post-event reporting.
- * (UC04 Main Flow Steps 64–65)
- */
+const reports = 'postEventReports';
+const mapEvent = (id: string, data: Record<string, unknown>): HazardEvent => ({
+  id,
+  title: String(data.title || ''),
+  status: data.status as HazardEvent['status'],
+  hazardType: data.hazardType as HazardEvent['hazardType'],
+  affectedDistricts: (data.affectedDistricts || []) as string[],
+  startDate: reportDate(data.startDate),
+  ...(data.closedAt ? { closedAt: reportDate(data.closedAt) } : {}),
+  description: String(data.description || ''),
+});
 export async function getClosedHazardEvents(): Promise<HazardEvent[]> {
-  const q = query(
-    collection(db, EVENTS_COLLECTION),
-    where('status', '==', 'closed'),
+  await requireDmcActor();
+  const snapshot = await getDocs(
+    query(collection(db, 'hazardEvents'), where('status', '==', 'closed'))
   );
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) => {
-    const data = d.data();
-    return {
-      id: d.id,
-      title: data.title || '',
-      hazardType: data.hazardType || 'flood',
-      status: data.status || 'closed',
-      affectedDistricts: data.affectedDistricts || [],
-      affectedRiverBasins: data.affectedRiverBasins || [],
-      startDate: data.startDate?.toDate?.()?.toISOString() || new Date().toISOString(),
-      description: data.description || '',
-    };
-  });
+  return snapshot.docs
+    .map(d => mapEvent(d.id, d.data()))
+    .sort((a, b) => b.startDate.localeCompare(a.startDate));
 }
-
-/**
- * Validates report generation request criteria against domain constraints.
- * (UC04 Step 70 & Exception Flows)
- */
 export function validateReportCriteria(
   event: HazardEvent | null,
-  criteria: ReportFilterCriteria,
+  criteria: ReportFilterCriteria
 ): { valid: boolean; error?: string } {
-  if (!event) {
-    return { valid: false, error: 'A valid hazard event must be selected.' };
+  const fail = (error: string) => ({ valid: false, error });
+  if (!event?.id) return fail('A valid hazard event must be selected.');
+  if (event.status !== 'closed')
+    return fail('Event Not Closed: Select a completed/closed hazard event.');
+  if (!criteria.selectedMetrics?.length)
+    return fail('At least one report metric must be selected.');
+  if (criteria.selectedMetrics.some(m => !REPORT_METRICS.some(option => option.value === m)))
+    return fail('Select valid report metrics.');
+  for (const date of [criteria.startDate, criteria.endDate]) {
+    if (
+      date &&
+      (!Number.isFinite(Date.parse(date)) ||
+        (date.length === 10 && new Date(date).toISOString().slice(0, 10) !== date))
+    )
+      return fail('Invalid date range: Enter valid dates.');
   }
-
-  // UC04 Exception Flow: Event Not Closed
-  if (event.status !== 'closed') {
-    return {
-      valid: false,
-      error: 'Event Not Closed: Selected hazard event is still active. Post-event reporting requires a completed/closed event.',
-    };
-  }
-
-  // At least one metric must be selected (Step 67)
-  if (!criteria.selectedMetrics || criteria.selectedMetrics.length === 0) {
-    return { valid: false, error: 'At least one report metric must be selected.' };
-  }
-
-  // Date range validation if provided
-  if (criteria.startDate && criteria.endDate) {
-    const start = new Date(criteria.startDate).getTime();
-    const end = new Date(criteria.endDate).getTime();
-    if (isNaN(start) || isNaN(end) || start > end) {
-      return { valid: false, error: 'Invalid date range: Start date must be before or equal to End date.' };
-    }
-  }
-
-  // District filter validation if provided
-  if (criteria.district && criteria.district !== 'all') {
-    if (!(SRI_LANKAN_DISTRICTS as readonly string[]).includes(criteria.district)) {
-      return { valid: false, error: `Invalid district filter: "${criteria.district}".` };
-    }
-  }
-
+  if (
+    criteria.startDate &&
+    criteria.endDate &&
+    reportRangeBoundary(criteria.startDate) > reportRangeBoundary(criteria.endDate, true)
+  )
+    return fail('Invalid date range: Start date must be before or equal to End date.');
+  if (
+    criteria.district &&
+    criteria.district !== 'all' &&
+    !(SRI_LANKAN_DISTRICTS as readonly string[]).includes(criteria.district)
+  )
+    return fail(`Invalid district filter: "${criteria.district}".`);
+  if (
+    criteria.district &&
+    criteria.district !== 'all' &&
+    !event.affectedDistricts.includes(criteria.district)
+  )
+    return fail('Select a district affected by this event.');
   return { valid: true };
 }
-
-/**
- * Generates a post-event response report concurrently aggregating selected metrics.
- * Implements partial fault tolerance and aggregation timeout isolation.
- * (UC04 Steps 71–74 & Exception Flow: Aggregation Timeout)
- */
+async function withTimeout<T>(operation: Promise<T>, milliseconds = 15000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Data source timeout. Please retry.')),
+          milliseconds
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+async function readSources(metric: ReportMetricType, eventId: string): Promise<ReportRecord[]> {
+  const name =
+    metric === 'shelter_occupancy'
+      ? 'shelters'
+      : metric === 'resource_distribution'
+        ? 'distributions'
+        : 'warnings';
+  const ref = collection(db, name);
+  // All shelters include event-tagged historical headcounts, even after reassignment.
+  const source =
+    name === 'shelters'
+      ? ref
+      : query(ref, where(name === 'warnings' ? 'eventId' : 'hazardEventId', '==', eventId));
+  const snapshot = await withTimeout(getDocs(source));
+  return snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+}
 export async function generatePostEventReport(
   event: HazardEvent,
   criteria: ReportFilterCriteria,
-  userId: string,
-  options?: {
-    mockTimeoutMetrics?: ReportMetricType[];
-    mockNoRecords?: boolean;
-  },
+  userId: string
 ): Promise<PostEventReport> {
-  // 1. Validation guard
-  const validation = validateReportCriteria(event, criteria);
-  if (!validation.valid) {
-    throw new Error(validation.error);
-  }
-
-  // UC04 Exception Flow: No Records for Selected Criteria
-  if (options?.mockNoRecords) {
-    throw new Error('No records found for the selected reporting criteria and filters.');
-  }
-
-  const timeoutSet = new Set(options?.mockTimeoutMetrics || []);
-
-  const metricsResult: PostEventReport['metrics'] = {
+  await requireDmcActor(userId);
+  const stored = await getDoc(doc(db, 'hazardEvents', event.id));
+  const current = stored.exists() ? mapEvent(stored.id, stored.data()) : null;
+  const normalized = { ...criteria, selectedMetrics: [...new Set(criteria.selectedMetrics || [])] };
+  const validation = validateReportCriteria(current, normalized);
+  if (!validation.valid) throw new Error(validation.error);
+  const metrics: PostEventReport['metrics'] = {
     alerts: null,
     citizenReach: null,
     shelterOccupancy: null,
     resourceDistribution: null,
   };
-
-  const failedMetrics: string[] = [];
-  const metricErrors: Record<string, string> = {};
-  let successCount = 0;
-
-  // Process Alert Timeline metric
-  if (criteria.selectedMetrics.includes('alert_timeline')) {
-    if (timeoutSet.has('alert_timeline')) {
-      metricsResult.alerts = 'Incomplete/Timeout';
-      failedMetrics.push('alert_timeline');
-      metricErrors.alert_timeline = 'Data source timeout querying alert timeline';
-      metricErrors.alerts = 'Data source timeout querying alert timeline';
-    } else {
-      metricsResult.alerts = {
-        totalAlertsIssued: 14,
-        escalationCount: 3,
-        warningsBySeverity: { EXTREME: 4, SEVERE: 6, MODERATE: 3, MINOR: 1 },
-        timeline: [
-          { timestamp: '2026-10-01T08:00:00Z', level: 'MODERATE', message: 'Heavy rainfall warning issued for Western Province' },
-          { timestamp: '2026-10-01T12:30:00Z', level: 'SEVERE', message: 'Kalu river water level reaching threshold. Level 2 alert.' },
-          { timestamp: '2026-10-01T16:00:00Z', level: 'EXTREME', message: 'Red evacuation alert for low-lying areas in Ratnapura.' },
-        ],
-      };
-      successCount++;
-    }
-  }
-
-  // Process Citizens Reached metric
-  if (criteria.selectedMetrics.includes('citizens_reached')) {
-    if (timeoutSet.has('citizens_reached')) {
-      metricsResult.citizenReach = 'Incomplete/Timeout';
-      failedMetrics.push('citizens_reached');
-      metricErrors.citizens_reached = 'Data source timeout querying recipient reach logs';
-      metricErrors.citizenReach = 'Data source timeout querying recipient reach logs';
-    } else {
-      metricsResult.citizenReach = {
-        totalCitizensReached: 128500,
-        reachBySector: { Ratnapura: 58000, Kalutara: 46500, Kegalle: 24000 },
-        notificationDeliveryRate: 98.4,
-        acknowledgedCount: 94200,
-      };
-      successCount++;
-    }
-  }
-
-  // Process Shelter Occupancy Over Time metric
-  if (criteria.selectedMetrics.includes('shelter_occupancy')) {
-    if (timeoutSet.has('shelter_occupancy')) {
-      metricsResult.shelterOccupancy = 'Incomplete/Timeout';
-      failedMetrics.push('shelter_occupancy');
-      metricErrors.shelter_occupancy = 'Data source timeout querying shelter headcounts';
-      metricErrors.shelterOccupancy = 'Data source timeout querying shelter headcounts';
-    } else {
-      metricsResult.shelterOccupancy = {
-        totalSheltersActive: 18,
-        peakOccupancyPercentage: 88.5,
-        totalCapacitiesOccupied: 4250,
-        timeSeriesOccupancy: [
-          { date: '2026-10-01', occupancyCount: 1200 },
-          { date: '2026-10-02', occupancyCount: 3400 },
-          { date: '2026-10-03', occupancyCount: 4250 },
-          { date: '2026-10-04', occupancyCount: 2900 },
-          { date: '2026-10-05', occupancyCount: 650 },
-        ],
-      };
-      successCount++;
-    }
-  }
-
-  // Process Resource Distribution by District metric (consuming UC03 operational records)
-  if (criteria.selectedMetrics.includes('resource_distribution')) {
-    if (timeoutSet.has('resource_distribution')) {
-      metricsResult.resourceDistribution = 'Incomplete/Timeout';
-      failedMetrics.push('resource_distribution');
-      metricErrors.resource_distribution = 'Data source timeout querying distribution ledger';
-      metricErrors.resourceDistribution = 'Data source timeout querying distribution ledger';
-    } else {
-      metricsResult.resourceDistribution = {
-        totalPackagesDistributed: 45200,
-        distributionByDistrict: {
-          Ratnapura: { foodKits: 14000, medicalKits: 2200, waterPurifiers: 6500, blankets: 3500 },
-          Kalutara: { foodKits: 10500, medicalKits: 1800, waterPurifiers: 4800, blankets: 1900 },
-        },
-      };
-      successCount++;
-    }
-  }
-
-  let overallStatus: PostEventReport['overallStatus'] = 'COMPLETE';
-  if (failedMetrics.length === criteria.selectedMetrics.length) {
-    overallStatus = 'FAILED';
-  } else if (failedMetrics.length > 0) {
-    overallStatus = 'PARTIAL_SUCCESS';
-  }
-
-  const reportData = {
+  const failedMetrics: string[] = [],
+    metricErrors: Record<string, string> = {};
+  const sourceCache = new Map<string, Promise<ReportRecord[]>>();
+  let recordCount = 0;
+  await Promise.all(
+    normalized.selectedMetrics.map(async metric => {
+      const key =
+        metric === 'alert_timeline' || metric === 'citizens_reached' ? 'warnings' : metric;
+      try {
+        if (!sourceCache.has(key)) sourceCache.set(key, readSources(metric, event.id));
+        const result = aggregatePostEventMetric(
+          metric,
+          await sourceCache.get(key)!,
+          normalized,
+          event.id
+        );
+        Object.assign(metrics, result.metrics);
+        recordCount += result.recordCount;
+      } catch (error) {
+        failedMetrics.push(metric);
+        metricErrors[metric] = (error as Error).message || 'Could not read this data source.';
+        const field = (
+          {
+            alert_timeline: 'alerts',
+            citizens_reached: 'citizenReach',
+            shelter_occupancy: 'shelterOccupancy',
+            resource_distribution: 'resourceDistribution',
+          } as const
+        )[metric];
+        metrics[field] = 'Incomplete/Timeout';
+      }
+    })
+  );
+  if (failedMetrics.length === normalized.selectedMetrics.length)
+    throw new Error(
+      'Report generation failed: Could not read the selected data sources. Retry generation.'
+    );
+  if (recordCount === 0 && !failedMetrics.length)
+    throw new Error('No records found for the selected reporting criteria and filters.');
+  // Check persisted event state again before storing a report.
+  const latest = await getDoc(doc(db, 'hazardEvents', event.id));
+  if (!latest.exists() || latest.data().status !== 'closed')
+    throw new Error('Event Not Closed: The event is no longer available for reporting.');
+  const data: Omit<PostEventReport, 'id'> = {
     eventId: event.id,
-    eventTitle: event.title,
+    eventTitle: current!.title,
     generatedBy: userId,
-    filterCriteria: criteria,
-    overallStatus,
+    generatedAt: new Date().toISOString(),
+    filterCriteria: normalized,
+    overallStatus: failedMetrics.length ? 'PARTIAL_SUCCESS' : 'COMPLETE',
     summary: {
-      totalMetricsCount: criteria.selectedMetrics.length,
-      successfulMetricsCount: successCount,
+      totalMetricsCount: normalized.selectedMetrics.length,
+      successfulMetricsCount: normalized.selectedMetrics.length - failedMetrics.length,
       failedMetricsCount: failedMetrics.length,
     },
-    metrics: metricsResult,
+    metrics,
     failedMetrics,
-    ...(failedMetrics.length > 0 ? { metricErrors } : {}),
-    createdAt: serverTimestamp(),
+    metricErrors,
   };
-
-  const docRef = await addDoc(collection(db, REPORTS_COLLECTION), reportData);
-
-  return {
-    id: docRef.id,
-    ...reportData,
-    generatedAt: new Date().toISOString(),
-  };
+  const ref = await addDoc(collection(db, reports), { ...data, createdAt: serverTimestamp() });
+  return { id: ref.id, ...data };
 }
-
-/**
- * Export generated response report to PDF or CSV format.
- * (UC04 Steps 76–80 & Exception Flow: Export Generation Failure)
- */
+export async function getPostEventReports(): Promise<PostEventReport[]> {
+  await requireDmcActor();
+  const snapshot = await getDocs(collection(db, reports));
+  return snapshot.docs
+    .map(d => ({ ...d.data(), id: d.id }) as PostEventReport)
+    .sort((a, b) => (b.generatedAt || '').localeCompare(a.generatedAt || ''));
+}
 export async function exportReport(
   reportId: string,
-  format: ExportFormat,
-  options?: { mockFailure?: boolean },
-): Promise<{ success: boolean; exportUrl: string; format: ExportFormat }> {
-  if (format !== 'pdf' && format !== 'csv') {
-    throw new Error(`Unsupported export format: "${format}". Supported formats: PDF, CSV.`);
-  }
-
-  // UC04 Exception Flow: Export Generation Failure
-  if (options?.mockFailure) {
-    throw new Error('Export Generation Failure: Failed to compile report export document.');
-  }
-
-  const exportUrl = `https://storage.disaster-warning.lk/reports/${format}/POST_EVENT_REPORT_${reportId}.${format}`;
-
-  await updateDoc(doc(db, REPORTS_COLLECTION, reportId), {
+  format: ExportFormat
+): Promise<{
+  success: boolean;
+  exportUrl: string;
+  format: ExportFormat;
+  artifact: ReportExportArtifact;
+}> {
+  await requireDmcActor();
+  if (!['pdf', 'csv'].includes(format))
+    throw new Error('Unsupported export format. Choose PDF or CSV.');
+  const snapshot = await getDoc(doc(db, reports, reportId));
+  if (!snapshot.exists()) throw new Error('Report not found.');
+  const report = { ...snapshot.data(), id: reportId } as PostEventReport;
+  const artifact = buildReportExport(report, format);
+  if (artifact.base64.length > 800000)
+    throw new Error('Export is too large. Narrow the date range or district and retry.');
+  const exportUrl = `report-export:${reportId}:${format}`;
+  const batch = writeBatch(db);
+  batch.set(doc(db, reports, reportId, 'exports', format), {
+    ...artifact,
+    createdAt: serverTimestamp(),
+  });
+  batch.update(doc(db, reports, reportId), {
     exportUrl,
     exportFormat: format,
     updatedAt: serverTimestamp(),
   });
-
-  return {
-    success: true,
-    exportUrl,
-    format,
-  };
+  await batch.commit();
+  return { success: true, exportUrl, format, artifact };
 }
-
-/**
- * Distribute exported response report to registered donor organisation.
- * (UC04 Steps 81–83 & Alternate Flow: Donor Report Distribution)
- */
+export async function getReportExport(
+  reportId: string,
+  format: ExportFormat
+): Promise<ReportExportArtifact> {
+  await requireDmcActor();
+  if (!['pdf', 'csv'].includes(format))
+    throw new Error('Unsupported export format. Choose PDF or CSV.');
+  const result = await getDoc(doc(db, reports, reportId, 'exports', format));
+  if (!result.exists()) throw new Error('Export file not found. Export the report again.');
+  return result.data() as ReportExportArtifact;
+}
+export async function getRegisteredDonors(): Promise<RegisteredDonor[]> {
+  await requireDmcActor();
+  const result = await getDocs(collection(db, 'donorOrganisations'));
+  return result.docs
+    .map(d => ({ id: d.id, name: d.data().name, email: d.data().email }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+export async function registerDonor(name: string, email: string): Promise<RegisteredDonor> {
+  const uid = await requireDmcActor();
+  name = name.trim();
+  email = email.trim().toLowerCase();
+  if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    throw new Error('Enter an organisation name and valid email address.');
+  const ref = await addDoc(collection(db, 'donorOrganisations'), {
+    name,
+    email,
+    createdBy: uid,
+    createdAt: serverTimestamp(),
+  });
+  return { id: ref.id, name, email };
+}
 export async function distributeReportToDonor(
   reportId: string,
   eventId: string,
   donorId: string,
-  donorName: string,
+  _donorName: string,
   format: ExportFormat,
   fileUrl: string,
-  userId: string,
+  userId: string
 ): Promise<DonorDistributionRecord> {
-  if (!donorId || !donorName) {
-    throw new Error('Donor organization identifier and name are mandatory for report distribution.');
-  }
-
-  const recordData = {
+  await requireDmcActor(userId);
+  if (!donorId) throw new Error('Select a registered donor organisation.');
+  const donor = await getDoc(doc(db, 'donorOrganisations', donorId));
+  const report = await getDoc(doc(db, reports, reportId));
+  if (!donor.exists() || !report.exists()) throw new Error('The donor or report no longer exists.');
+  if (report.data().overallStatus !== 'COMPLETE' || report.data().failedMetrics?.length)
+    throw new Error('Incomplete reports cannot be shared. Regenerate the affected metrics first.');
+  if (report.data().eventId !== eventId || fileUrl !== `report-export:${reportId}:${format}`)
+    throw new Error('The exported file does not match this report.');
+  await getReportExport(reportId, format);
+  const data: Omit<DonorDistributionRecord, 'id'> = {
     reportId,
     eventId,
     donorId,
-    donorName,
+    donorName: donor.data().name,
+    donorEmail: donor.data().email,
     format,
     fileUrl,
     distributedBy: userId,
-    status: 'SENT' as const,
-    distributedAt: serverTimestamp(),
-  };
-
-  const docRef = await addDoc(collection(db, DONOR_DISTRIBUTIONS_COLLECTION), recordData);
-
-  return {
-    id: docRef.id,
-    ...recordData,
     distributedAt: new Date().toISOString(),
+    status: 'SHARED',
   };
+  const result = await addDoc(collection(db, 'donorDistributions'), data);
+  return { id: result.id, ...data };
+}
+export async function getDonorDistributionHistory(
+  reportId: string
+): Promise<DonorDistributionRecord[]> {
+  await requireDmcActor();
+  const snapshot = await getDocs(
+    query(collection(db, 'donorDistributions'), where('reportId', '==', reportId))
+  );
+  return snapshot.docs
+    .map(d => ({ ...d.data(), id: d.id }) as DonorDistributionRecord)
+    .sort((a, b) => b.distributedAt.localeCompare(a.distributedAt));
 }

@@ -1,3 +1,8 @@
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+jest.mock('@/services/resourceAuthorization', () => ({
+  requireDistrictOfficer: jest.fn(async () => 'district-officer'),
+  requireActiveResourceEvent: jest.fn(async () => {}),
+}));
 /**
  * End-to-End Orchestration & Lifecycle Pipeline Test for UC03:
  * Coordinate Shelters, Rescue Teams and Relief Supplies.
@@ -23,15 +28,8 @@ import {
   updateOccupancy,
   deactivateShelter,
 } from '@/services/shelterService';
-import {
-  createTeam,
-  dispatchTeam,
-  updateTeamStatus,
-} from '@/services/rescueTeamService';
-import {
-  createSupply,
-  distributeSupply,
-} from '@/services/reliefSupplyService';
+import { createTeam, dispatchTeam, updateTeamStatus } from '@/services/rescueTeamService';
+import { createSupply, distributeSupply } from '@/services/reliefSupplyService';
 import { addDoc, updateDoc, getDoc } from 'firebase/firestore';
 
 describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
@@ -40,6 +38,15 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    installResourceFirestore({
+      'shelters/shelter-ratnapura-01': {
+        status: 'registered',
+        capacity: 250,
+        currentOccupancy: 0,
+        district: 'Ratnapura',
+      },
+      'rescueTeams/team-navy-rabs-01': { status: 'available', district: 'Ratnapura' },
+    });
   });
 
   it('executes the complete unified emergency coordination pipeline successfully', async () => {
@@ -63,7 +70,7 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
         organisationType: 'government',
         organisationName: 'District Secretariat Ratnapura',
       },
-      officerUid,
+      officerUid
     );
 
     expect(shelterId).toBe('shelter-ratnapura-01');
@@ -73,7 +80,7 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
         status: 'registered',
         currentOccupancy: 0,
         capacity: 250,
-      }),
+      })
     );
 
     // Officer activates shelter for active monsoon event
@@ -83,7 +90,7 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
       expect.objectContaining({
         status: 'active',
         hazardEventId,
-      }),
+      })
     );
 
     // -------------------------------------------------------------
@@ -96,7 +103,7 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
       expect.objectContaining({
         currentOccupancy: 100,
         status: 'active',
-      }),
+      })
     );
 
     // Step 2b: Additional evacuees arrive: headcount rises to 215 (86% - Approaching Capacity!)
@@ -106,7 +113,7 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
       expect.objectContaining({
         currentOccupancy: 215,
         status: 'active',
-      }),
+      })
     );
 
     // -------------------------------------------------------------
@@ -123,7 +130,7 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
         specialisation: 'Water Rescue',
         district: 'Ratnapura',
       },
-      officerUid,
+      officerUid
     );
 
     expect(teamId).toBe('team-navy-rabs-01');
@@ -135,26 +142,26 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
       expect.objectContaining({
         status: 'dispatched',
         assignedLocation: 'Elapatha Low-Lying Sector',
-      }),
+      })
     );
 
     // Unit advances mission status: en_route -> on_site -> completed -> available
     await updateTeamStatus(teamId, 'en_route');
     expect(updateDoc).toHaveBeenLastCalledWith(
       expect.anything(),
-      expect.objectContaining({ status: 'en_route' }),
+      expect.objectContaining({ status: 'en_route' })
     );
 
     await updateTeamStatus(teamId, 'on_site');
     expect(updateDoc).toHaveBeenLastCalledWith(
       expect.anything(),
-      expect.objectContaining({ status: 'on_site' }),
+      expect.objectContaining({ status: 'on_site' })
     );
 
     await updateTeamStatus(teamId, 'completed');
     expect(updateDoc).toHaveBeenLastCalledWith(
       expect.anything(),
-      expect.objectContaining({ status: 'completed', assignedLocation: '' }),
+      expect.objectContaining({ status: 'completed', assignedLocation: '' })
     );
 
     // -------------------------------------------------------------
@@ -173,7 +180,7 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
         district: 'Ratnapura',
       },
       officerUid,
-      hazardEventId,
+      hazardEventId
     );
 
     expect(supplyId).toBe('supply-rations-01');
@@ -188,7 +195,6 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
         unit: 'packs',
       }),
     });
-    (addDoc as jest.Mock).mockResolvedValueOnce({ id: 'dist-record-01' });
 
     const distTxnId = await distributeSupply(
       {
@@ -201,13 +207,13 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
         details: 'First relief convoy',
       },
       officerUid,
-      hazardEventId,
+      hazardEventId
     );
 
-    expect(distTxnId).toBe('dist-record-01');
+    expect(distTxnId).toMatch(/^generated-/);
     expect(updateDoc).toHaveBeenLastCalledWith(
       expect.anything(),
-      expect.objectContaining({ remainingQuantity: 1500 }),
+      expect.objectContaining({ remainingQuantity: 1500 })
     );
 
     // Exception Flow: Attempted overdraft (requesting 3000 packs when only 1500 remain)
@@ -233,8 +239,8 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
           details: 'Overdraft attempt',
         },
         officerUid,
-        hazardEventId,
-      ),
+        hazardEventId
+      )
     ).rejects.toThrow('Insufficient supplies. Requested: 3000, Available: 1500');
 
     // -------------------------------------------------------------
@@ -247,7 +253,7 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
       expect.objectContaining({
         currentOccupancy: 280,
         status: 'over_capacity', // Faithful truth logging
-      }),
+      })
     );
 
     // Decanting: 50 evacuees moved to another facility; headcount falls to 230
@@ -257,7 +263,7 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
       expect.objectContaining({
         currentOccupancy: 230,
         status: 'active', // Status restored
-      }),
+      })
     );
 
     // -------------------------------------------------------------
@@ -272,7 +278,7 @@ describe('UC03: Resource Coordination End-to-End Mission Pipeline', () => {
       expect.objectContaining({
         status: 'inactive',
         hazardEventId: '',
-      }),
+      })
     );
   });
 });

@@ -35,12 +35,12 @@ export interface RecipientResolutionResult {
  */
 export function resolveDistrictsFromTargetAreas(
   targetMode: TargetMode,
-  targetAreas: string[],
+  targetAreas: string[]
 ): string[] {
   if (!targetAreas || targetAreas.length === 0) return [];
 
   if (targetMode === 'district') {
-    return Array.from(new Set(targetAreas.map((a) => a.trim()).filter(Boolean)));
+    return Array.from(new Set(targetAreas.map(a => a.trim()).filter(Boolean)));
   }
 
   // Target Mode: River Basin — Map each basin to its contributing districts & deduplicate
@@ -55,7 +55,7 @@ export function resolveDistrictsFromTargetAreas(
   for (const basin of targetAreas) {
     const trimmed = basin.trim().toLowerCase();
     const districts = normalizedMap.get(trimmed) || SRI_LANKA_RIVER_BASINS[basin] || [];
-    districts.forEach((d) => districtSet.add(d));
+    districts.forEach(d => districtSet.add(d));
   }
   return Array.from(districtSet);
 }
@@ -69,7 +69,7 @@ export function resolveDistrictsFromTargetAreas(
  */
 export async function resolveRecipients(
   targetMode: TargetMode,
-  targetAreas: string[],
+  targetAreas: string[]
 ): Promise<RecipientResolutionResult> {
   const contributingDistricts = resolveDistrictsFromTargetAreas(targetMode, targetAreas);
 
@@ -94,12 +94,13 @@ export async function resolveRecipients(
     }
 
     await Promise.all(
-      districtChunks.map(async (chunk) => {
+      districtChunks.map(async chunk => {
         const q = query(collection(db, 'users'), where('district', 'in', chunk));
         const snap = await getDocs(q);
 
-        snap.docs.forEach((docSnap) => {
+        snap.docs.forEach(docSnap => {
           const d = docSnap.data();
+          if (d.role && d.role !== 'citizen' && d.role !== 'volunteer') return;
           const userId = docSnap.id;
           if (!userMap.has(userId)) {
             userMap.set(userId, {
@@ -113,11 +114,11 @@ export async function resolveRecipients(
             });
           }
         });
-      }),
+      })
     );
 
     const recipients = Array.from(userMap.values());
-    const recipientUids = recipients.map((r) => r.id);
+    const recipientUids = recipients.map(r => r.id);
 
     return {
       recipients,
@@ -128,13 +129,6 @@ export async function resolveRecipients(
     };
   } catch (error) {
     console.error('Error resolving warning recipients from Cloud Firestore:', error);
-    // Return clean fallback empty result on Firestore error
-    return {
-      recipients: [],
-      recipientCount: 0,
-      contributingDistricts,
-      resolvedDistricts: contributingDistricts,
-      recipientUids: [],
-    };
+    throw new Error('Could not check registered recipients. Try again.');
   }
 }

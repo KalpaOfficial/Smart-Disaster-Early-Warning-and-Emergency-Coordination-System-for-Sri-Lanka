@@ -1,3 +1,4 @@
+import { AppNoticeProvider } from '@/components/AppNoticeProvider';
 /**
  * Root layout — wraps the app with AuthProvider and handles auth-based routing.
  */
@@ -7,7 +8,8 @@ import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { AuthProvider } from '@/hooks/AuthContext';
 import { useAuth } from '@/hooks/useAuth';
-import { Colors } from '@/constants/colors';
+import { LightColors } from '@/constants/colors';
+import { LogoutConfirmationProvider } from '@/components/LogoutConfirmation';
 
 // Filter out benign React Native Web internal deprecation warnings in development
 if (Platform.OS === 'web') {
@@ -58,10 +60,10 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     }
   }, [state.isAuthenticated, state.isLoading, segments, isNavigationReady, router]);
 
-  if (state.isLoading) {
+  if (state.isLoading && !isNavigationReady) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator size="large" color={Colors.accent.primary} />
+        <ActivityIndicator size="large" color={LightColors.primary} />
       </View>
     );
   }
@@ -72,19 +74,23 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <StatusBar style="light" />
-      <AuthGuard>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: Colors.bg.primary },
-            animation: 'fade',
-          }}
-        >
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(app)" />
-        </Stack>
-      </AuthGuard>
+      <LogoutConfirmationProvider>
+        <AppNoticeProvider>
+          <StatusBar style="light" />
+          <AuthGuard>
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: LightColors.background },
+                animation: 'fade',
+              }}
+            >
+              <Stack.Screen name="(auth)" />
+              <Stack.Screen name="(app)" />
+            </Stack>
+          </AuthGuard>
+        </AppNoticeProvider>
+      </LogoutConfirmationProvider>
     </AuthProvider>
   );
 }
@@ -92,7 +98,7 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   loading: {
     flex: 1,
-    backgroundColor: Colors.bg.primary,
+    backgroundColor: LightColors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },

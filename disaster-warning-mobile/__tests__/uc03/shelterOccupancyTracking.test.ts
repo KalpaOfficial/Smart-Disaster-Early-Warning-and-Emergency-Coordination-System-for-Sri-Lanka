@@ -1,3 +1,8 @@
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+jest.mock('@/services/resourceAuthorization', () => ({
+  requireDistrictOfficer: jest.fn(async () => 'district-officer'),
+  requireActiveResourceEvent: jest.fn(async () => {}),
+}));
 /**
  * Unit Tests for UC03 Shelter Occupancy Tracking & Capacity Thresholds.
  *
@@ -16,6 +21,14 @@ describe('UC03: Shelter Occupancy Tracking & Capacity Telemetry', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    installResourceFirestore({
+      'shelters/shelter-kegalle-maha-vidyalaya': {
+        status: 'active',
+        capacity: 200,
+        currentOccupancy: 0,
+        district: 'Kegalle',
+      },
+    });
   });
 
   describe('Capacity and Utilization Calculations', () => {
@@ -65,7 +78,7 @@ describe('UC03: Shelter Occupancy Tracking & Capacity Telemetry', () => {
         expect.objectContaining({
           currentOccupancy: 140,
           status: 'active',
-        }),
+        })
       );
     });
 
@@ -77,7 +90,7 @@ describe('UC03: Shelter Occupancy Tracking & Capacity Telemetry', () => {
         expect.objectContaining({
           currentOccupancy: 200,
           status: 'active',
-        }),
+        })
       );
     });
 
@@ -89,7 +102,7 @@ describe('UC03: Shelter Occupancy Tracking & Capacity Telemetry', () => {
         expect.objectContaining({
           currentOccupancy: 0,
           status: 'active',
-        }),
+        })
       );
     });
   });
@@ -106,7 +119,7 @@ describe('UC03: Shelter Occupancy Tracking & Capacity Telemetry', () => {
         expect.objectContaining({
           currentOccupancy: 245,
           status: 'over_capacity',
-        }),
+        })
       );
 
       // Verifies remaining capacity is negative
@@ -127,7 +140,7 @@ describe('UC03: Shelter Occupancy Tracking & Capacity Telemetry', () => {
         expect.objectContaining({
           currentOccupancy: 400,
           status: 'over_capacity',
-        }),
+        })
       );
     });
   });
@@ -141,7 +154,7 @@ describe('UC03: Shelter Occupancy Tracking & Capacity Telemetry', () => {
         expect.objectContaining({
           currentOccupancy: 230,
           status: 'over_capacity',
-        }),
+        })
       );
 
       // Step 2: District Officer dispatches buses and transfers 50 evacuees to secondary shelter
@@ -152,7 +165,7 @@ describe('UC03: Shelter Occupancy Tracking & Capacity Telemetry', () => {
         expect.objectContaining({
           currentOccupancy: 180,
           status: 'active',
-        }),
+        })
       );
     });
   });

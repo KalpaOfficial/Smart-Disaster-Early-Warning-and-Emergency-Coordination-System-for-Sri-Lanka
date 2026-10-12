@@ -121,6 +121,22 @@ export const Colors = {
   },
 } as const;
 
+/** Shared light palette for screens redesigned to match the DisasterSafe references. */
+export const LightColors = {
+  background: '#F4F8FD',
+  surface: '#FFFFFF',
+  surfaceMuted: '#F8FAFD',
+  primary: '#0066FF',
+  primaryPressed: '#0052D9',
+  primarySoft: '#EAF2FF',
+  text: '#15243B',
+  secondaryText: '#5D6B80',
+  mutedText: '#7A879A',
+  border: '#DFE7F1',
+  danger: '#D92D3A',
+  dangerSoft: '#FFF1F2',
+} as const;
+
 export const Spacing = {
   xs: 4,
   sm: 8,
@@ -152,4 +168,15 @@ export const FontSize = {
   xxl: 24,
   xxxl: 28,
   display: 34,
+} as const;
+
+/** Readable text sizes shared by the redesigned mobile screens. */
+export const MobileTypography = {
+  body: { fontSize: 16, lineHeight: 24 },
+  label: { fontSize: 15, lineHeight: 22 },
+  caption: { fontSize: 14, lineHeight: 20 },
+  badge: { fontSize: 13, lineHeight: 18 },
+  small: { fontSize: 12, lineHeight: 18 },
+  button: { fontSize: 16, lineHeight: 22 },
+  section: { fontSize: 18, lineHeight: 24 },
 } as const;

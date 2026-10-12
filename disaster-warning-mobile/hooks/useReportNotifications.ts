@@ -38,8 +38,8 @@ export function useReportNotifications() {
   }, [fetchNotifications]);
 
   const dismissNotification = useCallback(async (notif: ReportNotification) => {
-    await markNotificationAsRead(notif.reportId, notif.status);
-    setNotifications((prev) => prev.filter((item) => item.id !== notif.id));
+    await markNotificationAsRead(notif.reportId, notif.status, notif.timestamp);
+    setNotifications(prev => prev.filter(item => item.id !== notif.id));
   }, []);
 
   const dismissAll = useCallback(async () => {

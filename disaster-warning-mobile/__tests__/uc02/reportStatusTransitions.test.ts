@@ -1,68 +1,49 @@
+import { auth } from '@/services/firebase';
+import {
+  verifyReport,
+  rejectReport,
+  requestAdditionalInfo,
+  submitAdditionalInfo,
+} from '@/services/groundReportService';
+import { installResourceFirestore } from '../helpers/resourceFirestore';
 import type { ReportStatus } from '@/types/groundReport';
-
-/**
- * Validates state transition lifecycle according to UC02:
- * pending_verification -> verified (terminal)
- * pending_verification -> rejected (terminal)
- * pending_verification -> info_requested -> pending_verification (re-evaluation loop)
- */
-function isValidStatusTransition(current: ReportStatus, next: ReportStatus): boolean {
-  switch (current) {
-    case 'pending_verification':
-      return next === 'verified' || next === 'rejected' || next === 'info_requested';
-    case 'info_requested':
-      // Submitter clarifies -> returns to pending_verification
-      // Or officer overrides directly
-      return next === 'pending_verification' || next === 'rejected';
-    case 'verified':
-      // Terminal state
-      return false;
-    case 'rejected':
-      // Terminal state
-      return false;
-    default:
-      return false;
+const officer = { uid: 'dmc', name: 'Duty officer', role: 'dmc_officer' as const };
+const transitions: [ReportStatus, ReportStatus, boolean][] = [
+  ['pending_verification', 'verified', true],
+  ['pending_verification', 'rejected', true],
+  ['pending_verification', 'info_requested', true],
+  ['info_requested', 'pending_verification', true],
+  ['info_requested', 'verified', true],
+  ['info_requested', 'rejected', true],
+  ['verified', 'pending_verification', false],
+  ['verified', 'rejected', false],
+  ['rejected', 'verified', false],
+  ['rejected', 'pending_verification', false],
+];
+it.each(transitions)(
+  'actual service transition %s ? %s is allowed=%s',
+  async (current, next, allowed) => {
+    Object.assign(auth, {
+      currentUser: { uid: next === 'pending_verification' ? 'citizen' : 'dmc' },
+    });
+    const store = installResourceFirestore({
+      'users/dmc': { role: 'dmc_officer' },
+      'groundReports/report': { status: current, submitterId: 'citizen' },
+    });
+    const operation =
+      next === 'verified'
+        ? verifyReport('report', officer, {})
+        : next === 'rejected'
+          ? rejectReport('report', officer, 'Invalid evidence')
+          : next === 'info_requested'
+            ? requestAdditionalInfo('report', officer, 'Please clarify')
+            : submitAdditionalInfo('report', 'Confirmed water depth');
+    if (allowed) {
+      await operation;
+      expect(store.records.get('groundReports/report')?.status).toBe(next);
+    } else {
+      await expect(operation).rejects.toThrow();
+      expect(store.records.get('groundReports/report')?.status).toBe(current);
+    }
   }
-}
-
-describe('UC02: Ground Report Status Transitions Lifecycle', () => {
-  describe('Valid Forward Transitions', () => {
-    it('allows pending_verification to transition to verified upon DMC approval', () => {
-      expect(isValidStatusTransition('pending_verification', 'verified')).toBe(true);
-    });
-
-    it('allows pending_verification to transition to rejected upon DMC rejection', () => {
-      expect(isValidStatusTransition('pending_verification', 'rejected')).toBe(true);
-    });
-
-    it('allows pending_verification to transition to info_requested for clarification', () => {
-      expect(isValidStatusTransition('pending_verification', 'info_requested')).toBe(true);
-    });
-
-    it('allows info_requested to return to pending_verification when submitter replies', () => {
-      expect(isValidStatusTransition('info_requested', 'pending_verification')).toBe(true);
-    });
-
-    it('allows info_requested to transition directly to rejected if clarification times out', () => {
-      expect(isValidStatusTransition('info_requested', 'rejected')).toBe(true);
-    });
-  });
-
-  describe('Disallowed / Terminal Transitions', () => {
-    it('prevents verified reports from transitioning back to pending_verification', () => {
-      expect(isValidStatusTransition('verified', 'pending_verification')).toBe(false);
-    });
-
-    it('prevents verified reports from transitioning directly to rejected', () => {
-      expect(isValidStatusTransition('verified', 'rejected')).toBe(false);
-    });
-
-    it('prevents rejected reports from transitioning to verified', () => {
-      expect(isValidStatusTransition('rejected', 'verified')).toBe(false);
-    });
-
-    it('prevents rejected reports from transitioning back to pending_verification', () => {
-      expect(isValidStatusTransition('rejected', 'pending_verification')).toBe(false);
-    });
-  });
-});
+);

@@ -10,10 +10,7 @@
  */
 
 export type ReportMetricType =
-  | 'alert_timeline'
-  | 'citizens_reached'
-  | 'shelter_occupancy'
-  | 'resource_distribution';
+  'alert_timeline' | 'citizens_reached' | 'shelter_occupancy' | 'resource_distribution';
 
 export type ExportFormat = 'pdf' | 'csv';
 
@@ -30,12 +27,7 @@ export interface AlertTimelineEntry {
 export interface AlertTimelineMetric {
   totalAlertsIssued: number;
   escalationCount: number;
-  warningsBySeverity: {
-    EXTREME: number;
-    SEVERE: number;
-    MODERATE: number;
-    MINOR: number;
-  };
+  warningsBySeverity: Record<string, number>;
   timeline: AlertTimelineEntry[];
 }
 
@@ -44,6 +36,7 @@ export interface CitizenReachMetric {
   reachBySector: Record<string, number>;
   notificationDeliveryRate: number;
   acknowledgedCount: number;
+  measurementNote?: string;
 }
 
 export interface OccupancyTimePoint {
@@ -63,6 +56,8 @@ export interface DistrictDistributionSummary {
   medicalKits: number;
   waterPurifiers: number;
   blankets: number;
+  tents?: number;
+  items?: { name: string; quantity: number; unit: string }[];
 }
 
 export interface ResourceDistributionMetric {
@@ -117,5 +112,19 @@ export interface DonorDistributionRecord {
   fileUrl: string;
   distributedBy: string;
   distributedAt: string;
-  status: 'SENT' | 'FAILED';
+  status: 'SENT' | 'FAILED' | 'SHARED';
+  donorEmail?: string;
+}
+
+export interface RegisteredDonor {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface ReportExportArtifact {
+  fileName: string;
+  mimeType: string;
+  base64: string;
+  format: ExportFormat;
 }

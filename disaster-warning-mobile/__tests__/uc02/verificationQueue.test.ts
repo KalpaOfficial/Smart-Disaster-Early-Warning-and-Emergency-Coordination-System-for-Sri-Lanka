@@ -1,12 +1,15 @@
+import { auth } from '@/services/firebase';
+import { installResourceFirestore } from '../helpers/resourceFirestore';
 import {
   getPendingReports,
+  getMyReports,
   getAllReports,
   verifyReport,
   rejectReport,
   requestAdditionalInfo,
 } from '@/services/groundReportService';
 import { getReportPermissions } from '@/constants/reportPermissions';
-import { updateDoc } from 'firebase/firestore';
+import { updateDoc, where } from 'firebase/firestore';
 
 describe('UC02: Verification Queue & Officer Decision Workflows', () => {
   const dmcOfficer = {
@@ -17,6 +20,18 @@ describe('UC02: Verification Queue & Officer Decision Workflows', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    Object.assign(auth, { currentUser: { uid: 'officer-dmc-01' } });
+    installResourceFirestore({
+      'users/officer-dmc-01': { role: 'dmc_officer' },
+      'groundReports/rep-verify-001': { status: 'pending_verification' },
+      'groundReports/rep-verify-002': { status: 'pending_verification' },
+      'groundReports/rep-reject-001': { status: 'pending_verification' },
+      'groundReports/rep-info-001': { status: 'pending_verification' },
+      'hazardEvents/evt-monsoon-2026': {
+        status: 'active',
+        title: 'South-West Monsoon Emergency Warning',
+      },
+    });
   });
 
   describe('Officer Permissions & Role Boundaries', () => {
@@ -68,21 +83,16 @@ describe('UC02: Verification Queue & Officer Decision Workflows', () => {
   });
 
   describe('Officer Rejection Workflow (Negative & Mandatory Reason)', () => {
-    it('enforces non-empty rejection justification before calling rejectReport', async () => {
-      const validateRejection = (reason: string): boolean => {
-        return !!reason && reason.trim().length > 0;
-      };
-
-      expect(validateRejection('')).toBe(false);
-      expect(validateRejection('   ')).toBe(false);
-      expect(validateRejection('Invalid photo, clear day at coordinates.')).toBe(true);
+    it('rejects empty reasons through the actual service', async () => {
+      await expect(rejectReport('rep-reject-001', dmcOfficer, ' ')).rejects.toThrow('reason');
+      expect(updateDoc).not.toHaveBeenCalled();
     });
 
     it('successfully logs rejection with officer rationale', async () => {
       await rejectReport(
         'rep-reject-001',
         dmcOfficer,
-        'Duplicate report already logged for this coordinate.',
+        'Duplicate report already logged for this coordinate.'
       );
 
       expect(updateDoc).toHaveBeenCalledTimes(1);
@@ -94,7 +104,7 @@ describe('UC02: Verification Queue & Officer Decision Workflows', () => {
       await requestAdditionalInfo(
         'rep-info-001',
         dmcOfficer,
-        'Please take a closer photo showing the bridge foundation.',
+        'Please take a closer photo showing the bridge foundation.'
       );
 
       expect(updateDoc).toHaveBeenCalledTimes(1);
@@ -107,51 +117,15 @@ describe('UC02: Verification Queue & Officer Decision Workflows', () => {
       expect(Array.isArray(verifiedFeed)).toBe(true);
     });
 
-    it('enforces that unverified reports can only be viewed by submitter or DMC officers', () => {
-      const canViewReport = (
-        report: { submitterId: string; status: string },
-        user: { id: string; role: string },
-      ): boolean => {
-        const isOfficer = user.role === 'dmc_officer';
-        const isSubmitter = user.id === report.submitterId;
-        const isPubliclyVerified = report.status === 'verified';
-        return isOfficer || isSubmitter || isPubliclyVerified;
-      };
-
-      const pendingReport = { submitterId: 'citizen-123', status: 'pending_verification' };
-      const verifiedReport = { submitterId: 'citizen-123', status: 'verified' };
-      const rejectedReport = { submitterId: 'citizen-123', status: 'rejected' };
-
-      const ownerUser = { id: 'citizen-123', role: 'citizen' };
-      const otherCitizen = { id: 'citizen-456', role: 'citizen' };
-      const officer = { id: 'officer-999', role: 'dmc_officer' };
-
-      // Submitter can view their own reports in all lifecycle states
-      expect(canViewReport(pendingReport, ownerUser)).toBe(true);
-      expect(canViewReport(verifiedReport, ownerUser)).toBe(true);
-      expect(canViewReport(rejectedReport, ownerUser)).toBe(true);
-
-      // DMC Officer can view all reports in queue for assessment
-      expect(canViewReport(pendingReport, officer)).toBe(true);
-      expect(canViewReport(verifiedReport, officer)).toBe(true);
-      expect(canViewReport(rejectedReport, officer)).toBe(true);
-
-      // General public and other citizens can ONLY view verified reports
-      expect(canViewReport(verifiedReport, otherCitizen)).toBe(true);
-      expect(canViewReport(pendingReport, otherCitizen)).toBe(false);
-      expect(canViewReport(rejectedReport, otherCitizen)).toBe(false);
+    it('requests the owner feed with a submitter filter rather than a public unfiltered query', async () => {
+      await getMyReports('citizen-123');
+      expect(where).toHaveBeenCalledWith('submitterId', '==', 'citizen-123');
     });
 
-    it('validates tab routing for citizens between verified feed and personal submissions', () => {
-      const resolveCitizenTab = (queryTab?: string): 'verified' | 'my_reports' => {
-        if (queryTab === 'my_reports' || queryTab === 'my') return 'my_reports';
-        return 'verified';
-      };
-
-      expect(resolveCitizenTab('verified')).toBe('verified');
-      expect(resolveCitizenTab('my_reports')).toBe('my_reports');
-      expect(resolveCitizenTab('my')).toBe('my_reports');
-      expect(resolveCitizenTab(undefined)).toBe('verified');
+    it('refuses signed-out verification even if the caller supplies an officer role', async () => {
+      Object.assign(auth, { currentUser: null });
+      await expect(verifyReport('rep-verify-002', dmcOfficer, {})).rejects.toThrow('Unauthorized');
+      expect(updateDoc).not.toHaveBeenCalled();
     });
   });
 });

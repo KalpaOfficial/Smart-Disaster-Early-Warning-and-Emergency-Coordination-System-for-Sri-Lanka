@@ -1,5 +1,50 @@
 # Smart Disaster Early-Warning and Emergency Coordination System for Sri Lanka
 
+## Demo database seeding
+
+Sign in as a **DMC officer**, open **Resource Coordination → System Data Seeder**,
+and select **Seed Complete Demo Dataset**. The project must already have a DMC
+officer account and at least one registered citizen or volunteer.
+
+The seeder covers the current Firestore modules: active and closed hazard events,
+warnings and escalation chains, per-channel delivery logs, event timelines,
+ground reports in all verification states, shelters, rescue teams, relief supply
+inventories and distributions, a closed-event response report, and donor audit
+examples. Every registered citizen or volunteer receives a personal pending
+report. Supply balances reconcile with the distribution ledger.
+
+Existing `users` documents and Firebase Auth accounts are preserved. References
+use existing user IDs; the seeder does not create fake login profiles. The data
+is fictional and marked `isDemo`. Delivery logs and donor audit examples do not
+send notifications or donor messages. Donor examples have `FAILED` status and no
+export file because no file was generated or sent.
+
+Stable document IDs allow repeated seeding without duplicates. Re-seeding resets
+the matching demo records and preserves other documents. All writes commit in
+one atomic batch, with a 500-document limit. The status check verifies every
+expected seed document and its version, including timelines and personal reports.
+
+UC03 resource writes are now restricted to District Officers, including demo
+records. DMC officers have read-only access to these resources. Consequently,
+the legacy DMC client seeder cannot commit the complete cross-role dataset under
+these rules; complete demo provisioning requires a trusted administrative import.
+Editing this repository does not deploy rules or populate the live database.
+
+## UC03 role flow
+
+District Officers land on a dedicated district dashboard with shelter management,
+rescue team coordination and relief inventory/distribution actions. Shelter
+registration captures location, ownership, facilities and contact details;
+activation requires an active district event. Occupancy updates preserve actual
+headcounts and history, including over-capacity counts. Shelters with remaining
+occupants cannot be deactivated.
+
+Citizens and volunteers use a read-only shelter directory with district,
+availability, facilities and text filters. Details show capacity, a location map,
+directions and contact information. Management actions are guarded in the UI,
+resource services and the local Firestore rules. Deploy those rules to enforce
+the same restriction for direct database clients.
+
 > **BSc (Hons) Software Engineering Project**  
 > Mobile Application (`disaster-warning-mobile`)
 

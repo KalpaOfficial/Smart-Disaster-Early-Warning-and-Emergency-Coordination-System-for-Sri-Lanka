@@ -3,10 +3,10 @@
  * Supports vector icons, glowing halo orbs, clear messaging, and primary CTA.
  */
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from './Button';
-import { Colors, FontSize, Spacing } from '@/constants/colors';
+import { Colors, FontSize, Spacing, LightColors, MobileTypography } from '@/constants/colors';
 
 interface EmptyStateProps {
   iconName?: keyof typeof Ionicons.glyphMap;
@@ -14,6 +14,7 @@ interface EmptyStateProps {
   message?: string;
   actionTitle?: string;
   onAction?: () => void;
+  appearance?: 'dark' | 'light';
 }
 
 export function EmptyState({
@@ -22,7 +23,27 @@ export function EmptyState({
   message,
   actionTitle,
   onAction,
+  appearance = 'dark',
 }: EmptyStateProps) {
+  if (appearance === 'light')
+    return (
+      <View style={styles.container}>
+        <View style={styles.lightIcon}>
+          <Ionicons name={iconName} size={36} color={LightColors.primary} />
+        </View>
+        <Text style={styles.lightTitle}>{title}</Text>
+        {!!message && <Text style={styles.lightMessage}>{message}</Text>}
+        {!!actionTitle && !!onAction && (
+          <TouchableOpacity
+            onPress={onAction}
+            accessibilityRole="button"
+            style={styles.lightButton}
+          >
+            <Text style={styles.lightButtonText}>{actionTitle}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
   return (
     <View style={styles.container}>
       <View style={styles.iconHalo}>
@@ -46,6 +67,38 @@ export function EmptyState({
 }
 
 const styles = StyleSheet.create({
+  lightIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    backgroundColor: LightColors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  lightTitle: {
+    ...MobileTypography.section,
+    color: LightColors.text,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  lightMessage: {
+    ...MobileTypography.body,
+    color: LightColors.secondaryText,
+    textAlign: 'center',
+    maxWidth: 320,
+    marginBottom: 24,
+  },
+  lightButton: {
+    minHeight: 48,
+    backgroundColor: LightColors.primary,
+    borderRadius: 14,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lightButtonText: { ...MobileTypography.button, color: '#FFFFFF', fontWeight: '700' },
   container: {
     alignItems: 'center',
     justifyContent: 'center',

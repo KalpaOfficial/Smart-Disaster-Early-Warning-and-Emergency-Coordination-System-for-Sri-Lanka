@@ -11,13 +11,17 @@ import {
   doc,
   getDoc,
   addDoc,
-  updateDoc,
   serverTimestamp,
+  onSnapshot,
+  runTransaction,
+  arrayUnion,
   type DocumentData,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
-import { db } from './firebase';
-import { attachReportToTimeline } from './hazardEventService';
+import type { UploadPhotoResult } from './photoUploadService';
+import { auth, db } from './firebase';
+import { requireDmcActor } from './workflowAuthorization';
+import { validateReportForm } from '@/utils/reportForm';
 import type {
   GroundReport,
   CreateGroundReportData,
@@ -28,6 +32,18 @@ import type {
 import type { UserRole } from '@/types/auth';
 
 const COLLECTION = 'groundReports';
+
+/** Live report summary and verification queue for the DMC dashboard. */
+export function subscribeToGroundReports(
+  onReports: (reports: GroundReport[]) => void,
+  onError: (error: Error) => void
+) {
+  return onSnapshot(
+    collection(db, COLLECTION),
+    snapshot => onReports(snapshot.docs.map(mapReportDoc)),
+    onError
+  );
+}
 
 /**
  * Maps a Firestore document snapshot to a GroundReport model.
@@ -65,6 +81,13 @@ function mapReportDoc(docSnap: QueryDocumentSnapshot<DocumentData>): GroundRepor
     observationType: d.observationType || 'other',
     description: d.description || '',
     photoUrl: d.photoUrl || '',
+    photoUrls:
+      Array.isArray(d.photoUrls) && d.photoUrls.length
+        ? d.photoUrls
+        : d.photoUrl
+          ? [d.photoUrl]
+          : [],
+    photoPaths: Array.isArray(d.photoPaths) ? d.photoPaths : d.photoPath ? [d.photoPath] : [],
     photoPath: d.photoPath || null,
     location: {
       latitude: d.location?.latitude ?? 6.9271,
@@ -89,7 +112,9 @@ function mapReportDoc(docSnap: QueryDocumentSnapshot<DocumentData>): GroundRepor
     infoRequestedMessage: d.infoRequestedMessage || null,
     additionalInfo: d.additionalInfo || null,
     createdAt: createdAtIso,
-    updatedAt: d.updatedAt?.toDate?.()?.toISOString() || createdAtIso,
+    updatedAt:
+      d.updatedAt?.toDate?.()?.toISOString() ||
+      (typeof d.updatedAt === 'string' ? d.updatedAt : createdAtIso),
   };
 }
 
@@ -117,23 +142,42 @@ export async function submitGroundReport(
     fullName: string;
     role: UserRole;
   },
+  photos?: UploadPhotoResult[]
 ): Promise<{ id: string; referenceNumber: string }> {
   // UC02 Phase 7.3: Role-based submission restriction
   if (submitter.role !== 'citizen' && submitter.role !== 'volunteer') {
     throw new Error(
-      `Unauthorized: Role '${submitter.role}' cannot submit ground reports. Only citizens and community volunteers can report hazard observations.`,
+      `Unauthorized: Role '${submitter.role}' cannot submit ground reports. Only citizens and community volunteers can report hazard observations.`
     );
   }
 
+  const errors = validateReportForm(data, true);
+  if (Object.keys(errors).length) throw new Error(Object.values(errors)[0]);
+  if (!Number.isFinite(Date.parse(data.captureTime)))
+    throw new Error('Enter a valid capture time.');
+  if (!photoUrl?.trim()) throw new Error('Add a photo of the hazard.');
   const referenceNumber = generateReferenceNumber();
-  // Firestore limit: each property must not exceed 1,048,487 bytes
-  const safePhotoUrl = photoUrl && photoUrl.length > 900000 ? '' : photoUrl;
+  if ((photos?.length || data.photoUris?.length || 1) > 5)
+    throw new Error('A report can include up to 5 photos.');
+  if (photos && photos.reduce((size, photo) => size + photo.photoUrl.length, 0) > 750000)
+    throw new Error('The photos are too large. Please choose smaller images.');
+  // The cover photo is stored again in photoUrls; count both copies against the document limit.
+  const safePhotoUrl = photoUrl;
+  const evidenceSize =
+    safePhotoUrl.length +
+    (photos
+      ? photos.reduce((size, photo) => size + photo.photoUrl.length, 0)
+      : safePhotoUrl.length);
+  if (evidenceSize > 900000)
+    throw new Error('The photos are too large. Please choose smaller images.');
 
   const docRef = await addDoc(collection(db, COLLECTION), {
     referenceNumber,
     observationType: data.observationType,
     description: data.description.trim(),
     photoUrl: safePhotoUrl,
+    photoUrls: photos?.map(photo => photo.photoUrl) || (safePhotoUrl ? [safePhotoUrl] : []),
+    photoPaths: photos?.map(photo => photo.photoPath) || (photoPath ? [photoPath] : []),
     photoPath,
     location: {
       latitude: data.location.latitude,
@@ -181,10 +225,7 @@ export async function getReportById(id: string): Promise<GroundReport | null> {
  * Primary verification queue used by DMC Duty Officers (UC02 Main Flow Step 13).
  */
 export async function getPendingReports(): Promise<GroundReport[]> {
-  const q = query(
-    collection(db, COLLECTION),
-    where('status', '==', 'pending_verification'),
-  );
+  const q = query(collection(db, COLLECTION), where('status', '==', 'pending_verification'));
   const snapshot = await getDocs(q);
   const items = snapshot.docs.map(mapReportDoc);
   return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -194,10 +235,7 @@ export async function getPendingReports(): Promise<GroundReport[]> {
  * Retrieve all ground reports submitted by a specific citizen or volunteer.
  */
 export async function getMyReports(submitterId: string): Promise<GroundReport[]> {
-  const q = query(
-    collection(db, COLLECTION),
-    where('submitterId', '==', submitterId),
-  );
+  const q = query(collection(db, COLLECTION), where('submitterId', '==', submitterId));
   const snapshot = await getDocs(q);
   const items = snapshot.docs.map(mapReportDoc);
   return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -242,45 +280,54 @@ export async function verifyReport(
     hazardEventId?: string | null;
     hazardEventTitle?: string | null;
     decisionNote?: string;
-  },
+  }
 ): Promise<void> {
   // UC02 Phase 7.3: Role-based verification restriction
   if (officer.role && officer.role !== 'dmc_officer') {
     throw new Error(
-      `Unauthorized: Role '${officer.role}' cannot verify ground reports. Only DMC Duty Officers have verification authority.`,
+      `Unauthorized: Role '${officer.role}' cannot verify ground reports. Only DMC Duty Officers have verification authority.`
     );
   }
 
-  const reportRef = doc(db, COLLECTION, reportId);
-
-  await updateDoc(reportRef, {
-    status: 'verified' as ReportStatus,
-    hazardEventId: payload.hazardEventId || null,
-    hazardEventTitle: payload.hazardEventTitle || null,
-    verifiedBy: officer.uid,
-    verifiedByName: officer.name,
-    verificationDecision: payload.decisionNote?.trim() || 'Verified by DMC Duty Officer.',
-    verificationTimestamp: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-
-  // If linked to an open hazard event, append report note into the event timeline (UC02 Phase 7.1)
-  if (payload.hazardEventId) {
-    try {
-      const snap = await getDoc(reportRef);
-      const rData = snap.data();
-      await attachReportToTimeline(payload.hazardEventId, reportId, {
-        referenceNumber: rData?.referenceNumber,
-        observationType: rData?.observationType,
-        locationName: rData?.locationName,
-        district: rData?.district,
-        officerName: officer.name,
-        headline: `Ground Report Verified: ${rData?.referenceNumber || payload.hazardEventTitle || 'Hazard Observation'}`,
+  await requireDmcActor(officer.uid);
+  await runTransaction(db, async transaction => {
+    const reportRef = doc(db, COLLECTION, reportId);
+    const snapshot = await transaction.get(reportRef);
+    if (!snapshot.exists()) throw new Error('Report not found.');
+    const report = snapshot.data();
+    if (!['pending_verification', 'info_requested'].includes(report.status))
+      throw new Error('This report has already been reviewed. Refresh to see the latest decision.');
+    const eventRef = payload.hazardEventId ? doc(db, 'hazardEvents', payload.hazardEventId) : null;
+    const event = eventRef ? await transaction.get(eventRef) : null;
+    if (event && (!event.exists() || event.data()?.status !== 'active'))
+      throw new Error('Select an active hazard event.');
+    transaction.update(reportRef, {
+      status: 'verified',
+      hazardEventId: payload.hazardEventId || null,
+      hazardEventTitle: event?.data()?.title || null,
+      verifiedBy: officer.uid,
+      verifiedByName: officer.name,
+      verificationDecision: payload.decisionNote?.trim() || 'Verified by DMC Duty Officer.',
+      verificationTimestamp: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    if (eventRef)
+      transaction.update(eventRef, {
+        timeline: arrayUnion({
+          id: 'timeline-report-' + reportId,
+          type: 'ground_report_verified',
+          reportId,
+          referenceNumber: report.referenceNumber || '',
+          observationType: report.observationType || 'other',
+          locationName: report.locationName || '',
+          district: report.district || '',
+          officerName: officer.name,
+          headline: 'Ground Report Verified: ' + (report.referenceNumber || reportId),
+          timestamp: new Date().toISOString(),
+        }),
+        updatedAt: serverTimestamp(),
       });
-    } catch (err) {
-      console.warn('Notice linking ground report to event timeline:', err);
-    }
-  }
+  });
 }
 
 /**
@@ -289,12 +336,9 @@ export async function verifyReport(
  */
 export async function getReportsForHazardEvent(
   hazardEventId: string,
-  status: ReportStatus | 'all' = 'verified',
+  status: ReportStatus | 'all' = 'verified'
 ): Promise<GroundReport[]> {
-  let q = query(
-    collection(db, COLLECTION),
-    where('hazardEventId', '==', hazardEventId),
-  );
+  let q = query(collection(db, COLLECTION), where('hazardEventId', '==', hazardEventId));
   if (status !== 'all') {
     q = query(q, where('status', '==', status));
   }
@@ -309,13 +353,24 @@ export async function getReportsForHazardEvent(
 export async function linkReportToHazardEvent(
   reportId: string,
   hazardEventId: string | null,
-  hazardEventTitle: string | null,
+  _hazardEventTitle: string | null
 ): Promise<void> {
-  const reportRef = doc(db, COLLECTION, reportId);
-  await updateDoc(reportRef, {
-    hazardEventId: hazardEventId || null,
-    hazardEventTitle: hazardEventTitle || null,
-    updatedAt: serverTimestamp(),
+  await requireDmcActor();
+  await runTransaction(db, async transaction => {
+    const reportRef = doc(db, COLLECTION, reportId);
+    const report = await transaction.get(reportRef);
+    if (!report.exists() || report.data().status !== 'verified')
+      throw new Error('Only verified reports can be linked to an event.');
+    const event = hazardEventId
+      ? await transaction.get(doc(db, 'hazardEvents', hazardEventId))
+      : null;
+    if (event && (!event.exists() || event.data()?.status !== 'active'))
+      throw new Error('Select an active hazard event.');
+    transaction.update(reportRef, {
+      hazardEventId: hazardEventId || null,
+      hazardEventTitle: event?.data()?.title || null,
+      updatedAt: serverTimestamp(),
+    });
   });
 }
 
@@ -331,24 +386,31 @@ export async function rejectReport(
     name: string;
     role?: UserRole;
   },
-  reason: string,
+  reason: string
 ): Promise<void> {
   // UC02 Phase 7.3: Role-based rejection restriction
   if (officer.role && officer.role !== 'dmc_officer') {
     throw new Error(
-      `Unauthorized: Role '${officer.role}' cannot reject ground reports. Only DMC Duty Officers have verification authority.`,
+      `Unauthorized: Role '${officer.role}' cannot reject ground reports. Only DMC Duty Officers have verification authority.`
     );
   }
 
-  const reportRef = doc(db, COLLECTION, reportId);
-
-  await updateDoc(reportRef, {
-    status: 'rejected' as ReportStatus,
-    verifiedBy: officer.uid,
-    verifiedByName: officer.name,
-    verificationDecision: reason.trim(),
-    verificationTimestamp: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+  if (!reason?.trim()) throw new Error('Add a reason before rejecting this report.');
+  await requireDmcActor(officer.uid);
+  await runTransaction(db, async transaction => {
+    const reportRef = doc(db, COLLECTION, reportId);
+    const report = await transaction.get(reportRef);
+    if (!report.exists()) throw new Error('Report not found.');
+    if (!['pending_verification', 'info_requested'].includes(report.data().status))
+      throw new Error('This report has already been reviewed. Refresh to see the latest decision.');
+    transaction.update(reportRef, {
+      status: 'rejected',
+      verificationDecision: reason.trim(),
+      verifiedBy: officer.uid,
+      verifiedByName: officer.name,
+      verificationTimestamp: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
   });
 }
 
@@ -363,23 +425,31 @@ export async function requestAdditionalInfo(
     name: string;
     role?: UserRole;
   },
-  message: string,
+  message: string
 ): Promise<void> {
   // UC02 Phase 7.3: Role-based info request restriction
   if (officer.role && officer.role !== 'dmc_officer') {
     throw new Error(
-      `Unauthorized: Role '${officer.role}' cannot request info on ground reports. Only DMC Duty Officers have verification authority.`,
+      `Unauthorized: Role '${officer.role}' cannot request info on ground reports. Only DMC Duty Officers have verification authority.`
     );
   }
 
-  const reportRef = doc(db, COLLECTION, reportId);
-
-  await updateDoc(reportRef, {
-    status: 'info_requested' as ReportStatus,
-    infoRequestedMessage: message.trim(),
-    verifiedBy: officer.uid,
-    verifiedByName: officer.name,
-    updatedAt: serverTimestamp(),
+  if (!message?.trim()) throw new Error('Write a message explaining what information you need.');
+  await requireDmcActor(officer.uid);
+  await runTransaction(db, async transaction => {
+    const reportRef = doc(db, COLLECTION, reportId);
+    const report = await transaction.get(reportRef);
+    if (!report.exists()) throw new Error('Report not found.');
+    if (!['pending_verification', 'info_requested'].includes(report.data().status))
+      throw new Error('This report has already been reviewed. Refresh to see the latest decision.');
+    transaction.update(reportRef, {
+      status: 'info_requested',
+      infoRequestedMessage: message.trim(),
+      verifiedBy: officer.uid,
+      verifiedByName: officer.name,
+      verificationTimestamp: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
   });
 }
 
@@ -389,14 +459,24 @@ export async function requestAdditionalInfo(
  */
 export async function submitAdditionalInfo(
   reportId: string,
-  additionalInfoText: string,
+  additionalInfoText: string
 ): Promise<void> {
-  const reportRef = doc(db, COLLECTION, reportId);
-
-  await updateDoc(reportRef, {
-    additionalInfo: additionalInfoText.trim(),
-    status: 'pending_verification' as ReportStatus,
-    updatedAt: serverTimestamp(),
+  if (!additionalInfoText?.trim()) throw new Error('Enter your clarification before submitting.');
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('Sign in as the original submitter to reply.');
+  await runTransaction(db, async transaction => {
+    const reportRef = doc(db, COLLECTION, reportId);
+    const report = await transaction.get(reportRef);
+    if (!report.exists()) throw new Error('Report not found.');
+    if (report.data().submitterId !== uid)
+      throw new Error('Only the original submitter can reply to this report.');
+    if (report.data().status !== 'info_requested')
+      throw new Error('This report has no outstanding information request.');
+    transaction.update(reportRef, {
+      additionalInfo: additionalInfoText.trim(),
+      status: 'pending_verification',
+      updatedAt: serverTimestamp(),
+    });
   });
 }
 
@@ -404,12 +484,12 @@ export async function submitAdditionalInfo(
  * Retrieve verified reports linked to a specific hazard event (UC02 Postconditions).
  */
 export async function getVerifiedReportsForHazardEvent(
-  hazardEventId: string,
+  hazardEventId: string
 ): Promise<GroundReport[]> {
   const q = query(
     collection(db, COLLECTION),
     where('hazardEventId', '==', hazardEventId),
-    where('status', '==', 'verified'),
+    where('status', '==', 'verified')
   );
   const snapshot = await getDocs(q);
   const items = snapshot.docs.map(mapReportDoc);

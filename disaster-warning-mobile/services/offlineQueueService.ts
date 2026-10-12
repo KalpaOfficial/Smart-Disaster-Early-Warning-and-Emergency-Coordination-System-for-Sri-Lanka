@@ -5,10 +5,7 @@
  * and Exception Flow: Synchronisation Failure (preserves queued report and supports retry).
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type {
-  CreateGroundReportData,
-  OfflineReportQueueItem,
-} from '@/types/groundReport';
+import type { CreateGroundReportData, OfflineReportQueueItem } from '@/types/groundReport';
 import type { UserRole } from '@/types/auth';
 import { uploadGroundReportPhoto } from './photoUploadService';
 import { submitGroundReport } from './groundReportService';
@@ -63,12 +60,12 @@ export async function queueOfflineReport(
     id: string;
     fullName: string;
     role: UserRole;
-  },
+  }
 ): Promise<OfflineReportQueueItem> {
   // UC02 Phase 7.3: Role-based submission restriction
   if (submitter.role !== 'citizen' && submitter.role !== 'volunteer') {
     throw new Error(
-      `Unauthorized: Role '${submitter.role}' cannot queue ground reports. Only citizens and community volunteers can report hazard observations.`,
+      `Unauthorized: Role '${submitter.role}' cannot queue ground reports. Only citizens and community volunteers can report hazard observations.`
     );
   }
 
@@ -87,6 +84,7 @@ export async function queueOfflineReport(
       captureTime: data.captureTime,
     },
     localPhotoUri: data.photoUri,
+    localPhotoUris: data.photoUris?.length ? data.photoUris : [data.photoUri],
     submitterId: submitter.id,
     submitterName: submitter.fullName,
     submitterRole: submitter.role,
@@ -106,7 +104,7 @@ export async function queueOfflineReport(
 export async function removeQueuedReport(queueId: string): Promise<void> {
   try {
     const queue = await getQueuedReports();
-    const filtered = queue.filter((item) => item.queueId !== queueId);
+    const filtered = queue.filter(item => item.queueId !== queueId);
     await AsyncStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(filtered));
   } catch (err) {
     console.warn('Failed to remove synced report from queue:', err);
@@ -118,11 +116,11 @@ export async function removeQueuedReport(queueId: string): Promise<void> {
  */
 export async function recordSyncAttemptFailure(
   queueId: string,
-  errorMessage: string,
+  errorMessage: string
 ): Promise<void> {
   try {
     const queue = await getQueuedReports();
-    const updated = queue.map((item) => {
+    const updated = queue.map(item => {
       if (item.queueId === queueId) {
         return {
           ...item,
@@ -142,28 +140,22 @@ export async function recordSyncAttemptFailure(
  * Synchronize a single queued report to Cloud Firebase.
  * Uploads photo, creates Firestore document, and clears it from local queue on success.
  */
-export async function syncSingleQueuedReport(
-  item: OfflineReportQueueItem,
-): Promise<SyncResult> {
+export async function syncSingleQueuedReport(item: OfflineReportQueueItem): Promise<SyncResult> {
   try {
-    // 1. Upload photograph to Firebase Storage
-    let photoUrl = '';
-    let photoPath: string | null = null;
-
-    if (item.localPhotoUri) {
-      const uploadRes = await uploadGroundReportPhoto(
-        item.localPhotoUri,
-        item.queueId,
-      );
-      photoUrl = uploadRes.photoUrl;
-      photoPath = uploadRes.photoPath;
+    const uris = item.localPhotoUris?.length ? item.localPhotoUris : [item.localPhotoUri];
+    const photos = [];
+    for (let index = 0; index < uris.length; index++) {
+      photos.push(await uploadGroundReportPhoto(uris[index], item.queueId + '-photo-' + index));
     }
+    const photoUrl = photos[0]?.photoUrl || '';
+    const photoPath = photos[0]?.photoPath || null;
 
     // 2. Submit report into Cloud Firestore
     const res = await submitGroundReport(
       {
         ...item.reportData,
         photoUri: item.localPhotoUri,
+        photoUris: uris,
       },
       photoUrl,
       photoPath,
@@ -172,6 +164,7 @@ export async function syncSingleQueuedReport(
         fullName: item.submitterName,
         role: item.submitterRole,
       },
+      photos
     );
 
     // 3. Remove from local queue

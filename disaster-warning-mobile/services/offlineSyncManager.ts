@@ -2,7 +2,7 @@
  * Offline Sync Manager for UC02: Submit and Verify Ground Report.
  * UC02 Alternate Flow: Offline Capture and Delayed Synchronisation.
  * UC02 Exception Flow: Synchronisation Failure.
- * 
+ *
  * Manages automated background synchronisation when connectivity restores:
  * - Monitors network connectivity transitions via NetInfo.
  * - Automatically triggers queue processing when the device comes online.
@@ -65,7 +65,7 @@ class OfflineSyncManager {
    */
   private notifyListeners() {
     const event = { ...this.currentProgress };
-    this.listeners.forEach((listener) => {
+    this.listeners.forEach(listener => {
       try {
         listener(event);
       } catch (err) {
@@ -111,27 +111,29 @@ class OfflineSyncManager {
 
     let wasOffline = false;
 
-    this.netInfoUnsubscribe = NetInfo.addEventListener((state) => {
+    this.netInfoUnsubscribe = NetInfo.addEventListener(state => {
       const isOnline = Boolean(state.isConnected && state.isInternetReachable !== false);
 
       if (wasOffline && isOnline) {
         // Transitioned from offline to online -> trigger delayed synchronisation
         console.log('[OfflineSyncManager] Network restored. Triggering auto-sync...');
-        this.syncQueue();
+        void this.syncQueue().catch(() => {});
       }
 
       wasOffline = !isOnline;
     });
 
     // Also test initial connectivity on startup
-    NetInfo.fetch().then((state) => {
-      const isOnline = Boolean(state.isConnected && state.isInternetReachable !== false);
-      if (isOnline) {
-        this.syncQueue();
-      } else {
-        wasOffline = true;
-      }
-    });
+    NetInfo.fetch()
+      .then(state => {
+        const isOnline = Boolean(state.isConnected && state.isInternetReachable !== false);
+        if (isOnline) {
+          void this.syncQueue().catch(() => {});
+        } else {
+          wasOffline = true;
+        }
+      })
+      .catch(() => {});
   }
 
   /**
@@ -164,6 +166,25 @@ class OfflineSyncManager {
       };
     }
 
+    this.isSyncing = true;
+    try {
+      return await this.performSync();
+    } catch (error) {
+      this.currentProgress = {
+        ...this.currentProgress,
+        state: 'error',
+        currentQueueId: null,
+        error: (error as Error).message || 'Could not synchronize reports.',
+        timestamp: new Date().toISOString(),
+      };
+      this.notifyListeners();
+      throw error;
+    } finally {
+      this.isSyncing = false;
+    }
+  }
+
+  private async performSync(): Promise<SyncBatchSummary> {
     // Verify online status before beginning
     const netState = await NetInfo.fetch();
     const isOnline = Boolean(netState.isConnected && netState.isInternetReachable !== false);
@@ -198,7 +219,6 @@ class OfflineSyncManager {
       };
     }
 
-    this.isSyncing = true;
     this.currentProgress = {
       state: 'syncing',
       total: queue.length,
@@ -218,10 +238,14 @@ class OfflineSyncManager {
     for (const item of queue) {
       // Re-verify network liveness before each upload to prevent partial stalls
       const currentNet = await NetInfo.fetch();
-      const stillOnline = Boolean(currentNet.isConnected && currentNet.isInternetReachable !== false);
+      const stillOnline = Boolean(
+        currentNet.isConnected && currentNet.isInternetReachable !== false
+      );
 
       if (!stillOnline) {
-        console.log('[OfflineSyncManager] Network disconnected mid-sync. Aborting remainder of queue.');
+        console.log(
+          '[OfflineSyncManager] Network disconnected mid-sync. Aborting remainder of queue.'
+        );
         failedCount += queue.length - (syncedCount + failedCount);
         break;
       }
@@ -246,7 +270,6 @@ class OfflineSyncManager {
       }
     }
 
-    this.isSyncing = false;
     this.currentProgress = {
       state: failedCount === 0 ? 'completed' : 'error',
       total: queue.length,
@@ -261,9 +284,11 @@ class OfflineSyncManager {
     // If some reports failed, schedule a backoff retry if auto-sync is enabled
     if (failedCount > 0 && this.isAutoSyncEnabled) {
       const delayMs = this.calculateBackoffDelay(maxFailedAttempts);
-      console.log(`[OfflineSyncManager] Scheduling retry in ${delayMs / 1000}s for failed reports.`);
+      console.log(
+        `[OfflineSyncManager] Scheduling retry in ${delayMs / 1000}s for failed reports.`
+      );
       this.retryTimeoutId = setTimeout(() => {
-        this.syncQueue();
+        void this.syncQueue().catch(() => {});
       }, delayMs);
     }
 

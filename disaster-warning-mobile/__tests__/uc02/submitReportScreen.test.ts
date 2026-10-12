@@ -1,82 +1,76 @@
 import { submitGroundReport } from '@/services/groundReportService';
 import { queueOfflineReport } from '@/services/offlineQueueService';
 import { getReportPermissions } from '@/constants/reportPermissions';
+import { validateReportForm } from '@/utils/reportForm';
 import type { CreateGroundReportData } from '@/types/groundReport';
+import type { UserRole } from '@/types/auth';
 
-describe('UC02: Submit Report Screen Workflow & Step Navigation Logic', () => {
-  const TOTAL_STEPS = 5;
+it.each([undefined, null, 'unknown'])(
+  'denies submission and review capabilities for an unrecognized role: %s',
+  role => {
+    expect(getReportPermissions(role as UserRole | null | undefined)).toEqual({
+      canSubmit: false,
+      canVerify: false,
+      canSeeQueue: false,
+      canSeeOwnReports: false,
+      canViewVerifiedReports: true,
+    });
+  }
+);
 
-  const validateStepState = (
-    step: number,
-    data: Partial<CreateGroundReportData>,
-  ): { valid: boolean; error?: string } => {
-    switch (step) {
-      case 1:
-        if (!data.observationType) {
-          return { valid: false, error: 'Please select an observation type.' };
-        }
-        return { valid: true };
-      case 2:
-        if (!data.description || data.description.trim().length < 10) {
-          return { valid: false, error: 'Description must be at least 10 characters.' };
-        }
-        return { valid: true };
-      case 3:
-        if (!data.photoUri) {
-          return { valid: false, error: 'A photograph of the hazard is required.' };
-        }
-        return { valid: true };
-      case 4:
-        if (!data.locationName || !data.locationName.trim()) {
-          return { valid: false, error: 'Location name is required.' };
-        }
-        if (!data.district) {
-          return { valid: false, error: 'Please select a district.' };
-        }
-        return { valid: true };
-      case 5:
-        // Review step
-        return { valid: true };
-      default:
-        return { valid: false, error: 'Invalid step.' };
-    }
+describe('Single-page hazard report', () => {
+  const validForm: CreateGroundReportData = {
+    observationType: 'rising_water',
+    description: 'Water is covering the road near the bridge.',
+    photoUri: 'file:///photo.jpg',
+    location: { latitude: 6.9271, longitude: 79.8612 },
+    locationName: 'Kelani bridge',
+    district: 'Colombo',
+    isManualLocation: false,
+    captureTime: '2026-10-11T08:00:00Z',
   };
-
-  describe('Step Progression and Validation', () => {
-    it('blocks progression from Step 1 when observation type is not selected', () => {
-      expect(validateStepState(1, {}).valid).toBe(false);
-      expect(validateStepState(1, { observationType: 'rising_water' }).valid).toBe(true);
+  describe('Complete form validation', () => {
+    it('reports every missing field in one submission attempt', () => {
+      expect(Object.keys(validateReportForm({}, false))).toEqual([
+        'observationType',
+        'description',
+        'photo',
+        'locationName',
+        'district',
+        'location',
+      ]);
     });
-
-    it('blocks progression from Step 2 when description is under 10 characters', () => {
-      expect(validateStepState(2, { description: 'short' }).valid).toBe(false);
-      expect(
-        validateStepState(2, {
-          description: 'Flash flooding observed across main street',
-        }).valid,
-      ).toBe(true);
+    it('accepts a complete report with a confirmed location', () => {
+      expect(validateReportForm(validForm, true)).toEqual({});
     });
-
-    it('blocks progression from Step 3 when photograph is missing', () => {
-      expect(validateStepState(3, {}).valid).toBe(false);
-      expect(
-        validateStepState(3, { photoUri: 'file:///cache/photo.jpg' }).valid,
-      ).toBe(true);
+    it('requires an explicit location rather than accepting the initial Colombo coordinates', () => {
+      expect(validateReportForm(validForm, false).location).toBeDefined();
     });
-
-    it('blocks progression from Step 4 when location name or district is missing', () => {
-      expect(validateStepState(4, { locationName: '' }).valid).toBe(false);
+    it('rejects invalid coordinates and districts', () => {
       expect(
-        validateStepState(4, { locationName: 'Kaduwela Bridge', district: '' }).valid,
-      ).toBe(false);
-      expect(
-        validateStepState(4, { locationName: 'Kaduwela Bridge', district: 'Colombo' })
-          .valid,
-      ).toBe(true);
+        validateReportForm(
+          { ...validForm, district: 'Unknown', location: { latitude: NaN, longitude: 181 } },
+          true
+        )
+      ).toMatchObject({ district: expect.any(String), location: expect.any(String) });
     });
-
-    it('enforces total steps count of 5', () => {
-      expect(TOTAL_STEPS).toBe(5);
+    it('rejects a description outside the allowed length', () => {
+      expect(
+        validateReportForm({ ...validForm, description: '  water  ' }, true).description
+      ).toBeDefined();
+      expect(
+        validateReportForm({ ...validForm, description: 'x'.repeat(1001) }, true).description
+      ).toBeDefined();
+    });
+    it('requires a hazard category and attached photo', () => {
+      const result = validateReportForm(
+        { ...validForm, observationType: undefined, photoUri: '' },
+        true
+      );
+      expect(result).toMatchObject({
+        observationType: expect.any(String),
+        photo: expect.any(String),
+      });
     });
   });
 
@@ -103,7 +97,7 @@ describe('UC02: Submit Report Screen Workflow & Step Navigation Logic', () => {
         validData,
         'https://storage.firebase/uploaded.jpg',
         'path.jpg',
-        citizenUser,
+        citizenUser
       );
       expect(res.id).toBeDefined();
       expect(res.referenceNumber).toMatch(/^GR-\d{8}-\d{4}$/);
@@ -116,7 +110,7 @@ describe('UC02: Submit Report Screen Workflow & Step Navigation Logic', () => {
       expect(queuedItem.reportData.observationType).toBe('landslide_crack');
     });
 
-    it('verifies submit screen blocks officer roles before step rendering', () => {
+    it('verifies submit screen blocks officer roles before showing the form', () => {
       expect(getReportPermissions('dmc_officer').canSubmit).toBe(false);
       expect(getReportPermissions('district_officer').canSubmit).toBe(false);
       expect(getReportPermissions('citizen').canSubmit).toBe(true);

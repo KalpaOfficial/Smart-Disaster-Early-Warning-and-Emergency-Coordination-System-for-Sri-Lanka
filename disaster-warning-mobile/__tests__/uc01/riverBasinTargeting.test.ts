@@ -1,3 +1,16 @@
+import { auth } from '@/services/firebase';
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+beforeEach(() => {
+  Object.assign(auth, { currentUser: { uid: 'officer-001' } });
+  installResourceFirestore({
+    'users/officer-001': { role: 'dmc_officer' },
+    'hazardEvents/event-kalu-2026': {
+      status: 'active',
+      hazardType: 'flood',
+      title: 'Fixture flood event',
+    },
+  });
+});
 /**
  * Unit Tests for UC01 River Basin Targeting Flow.
  *
@@ -10,10 +23,7 @@
  * 6. Return contributing districts for display.
  * 7. Use final unique recipient list for multi-channel delivery.
  */
-import {
-  resolveDistrictsFromTargetAreas,
-  resolveRecipients,
-} from '@/services/recipientService';
+import { resolveDistrictsFromTargetAreas, resolveRecipients } from '@/services/recipientService';
 import { executeWarningDispatchPipeline } from '@/services/warningService';
 import type { CreateWarningPayload } from '@/types/warning';
 
@@ -24,19 +34,43 @@ jest.mock('@/services/recipientService', () => {
     ...actual,
     resolveRecipients: jest.fn().mockImplementation(async (mode, areas) => {
       if (!areas || areas.length === 0) {
-        return { recipients: [], recipientCount: 0, contributingDistricts: [], resolvedDistricts: [], recipientUids: [] };
+        return {
+          recipients: [],
+          recipientCount: 0,
+          contributingDistricts: [],
+          resolvedDistricts: [],
+          recipientUids: [],
+        };
       }
       if (mode === 'river_basin') {
         const contributingDistricts = actual.resolveDistrictsFromTargetAreas(mode, areas);
         // Simulate Firestore recipients in Ratnapura & Kalutara with one duplicate entry
         const mockUsers = [
-          { id: 'user-001', fullName: 'Citizen Perera', district: 'Ratnapura', role: 'citizen', email: 'perera@test.com' },
-          { id: 'user-002', fullName: 'Citizen Fernando', district: 'Kalutara', role: 'citizen', email: 'fernando@test.com' },
-          { id: 'user-001', fullName: 'Citizen Perera Duplicate', district: 'Ratnapura', role: 'citizen', email: 'perera@test.com' },
+          {
+            id: 'user-001',
+            fullName: 'Citizen Perera',
+            district: 'Ratnapura',
+            role: 'citizen',
+            email: 'perera@test.com',
+          },
+          {
+            id: 'user-002',
+            fullName: 'Citizen Fernando',
+            district: 'Kalutara',
+            role: 'citizen',
+            email: 'fernando@test.com',
+          },
+          {
+            id: 'user-001',
+            fullName: 'Citizen Perera Duplicate',
+            district: 'Ratnapura',
+            role: 'citizen',
+            email: 'perera@test.com',
+          },
         ];
         // Deduplicate by ID
         const userMap = new Map();
-        mockUsers.forEach((u) => {
+        mockUsers.forEach(u => {
           if (!userMap.has(u.id)) userMap.set(u.id, u);
         });
         const recipients = Array.from(userMap.values());
@@ -45,7 +79,7 @@ jest.mock('@/services/recipientService', () => {
           recipientCount: recipients.length,
           contributingDistricts,
           resolvedDistricts: contributingDistricts,
-          recipientUids: recipients.map((r) => r.id),
+          recipientUids: recipients.map(r => r.id),
         };
       }
       return actual.resolveRecipients(mode, areas);
@@ -65,7 +99,7 @@ describe('UC01 River Basin Targeting Flow', () => {
     it('should identify and deduplicate districts across multiple overlapping river basins', () => {
       const districts = resolveDistrictsFromTargetAreas('river_basin', [
         'Nilwala River Basin', // Matara, Galle
-        'Gin River Basin',     // Galle, Matara
+        'Gin River Basin', // Galle, Matara
       ]);
       expect(districts.sort()).toEqual(['Galle', 'Matara']);
     });
@@ -110,7 +144,7 @@ describe('UC01 River Basin Targeting Flow', () => {
       const dispatchResult = await executeWarningDispatchPipeline(
         payload,
         'officer-001',
-        'DMC Duty Officer',
+        'DMC Duty Officer'
       );
 
       expect(dispatchResult.warningId).toBeDefined();
@@ -118,7 +152,7 @@ describe('UC01 River Basin Targeting Flow', () => {
       expect(dispatchResult.finalStatus).toBe('delivered');
 
       // Verify each channel delivered to the exact unique recipient count
-      dispatchResult.channelResults.forEach((ch) => {
+      dispatchResult.channelResults.forEach(ch => {
         expect(ch.recipientCount).toBe(2);
         expect(ch.deliveredCount).toBe(2);
         expect(ch.failedCount).toBe(0);

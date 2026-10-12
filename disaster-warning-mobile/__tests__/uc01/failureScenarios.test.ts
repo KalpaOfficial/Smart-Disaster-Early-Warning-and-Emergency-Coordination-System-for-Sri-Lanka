@@ -1,3 +1,16 @@
+import { auth } from '@/services/firebase';
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+beforeEach(() => {
+  Object.assign(auth, { currentUser: { uid: 'officer-001' } });
+  installResourceFirestore({
+    'users/officer-001': { role: 'dmc_officer' },
+    'hazardEvents/event-test-monsoon-2026': {
+      status: 'active',
+      hazardType: 'flood',
+      title: 'Fixture flood event',
+    },
+  });
+});
 /**
  * Unit Tests for UC01 Delivery Failure Scenarios (Scenario A & Scenario B).
  *
@@ -31,8 +44,20 @@ jest.mock('@/services/recipientService', () => {
       }
       return {
         recipients: [
-          { id: 'u-1', fullName: 'User 1', district: 'Ratnapura', role: 'citizen', email: 'u1@test.com' },
-          { id: 'u-2', fullName: 'User 2', district: 'Kalutara', role: 'citizen', email: 'u2@test.com' },
+          {
+            id: 'u-1',
+            fullName: 'User 1',
+            district: 'Ratnapura',
+            role: 'citizen',
+            email: 'u1@test.com',
+          },
+          {
+            id: 'u-2',
+            fullName: 'User 2',
+            district: 'Kalutara',
+            role: 'citizen',
+            email: 'u2@test.com',
+          },
         ],
         recipientCount: 2,
         contributingDistricts: ['Ratnapura', 'Kalutara'],
@@ -69,27 +94,27 @@ describe('UC01 Delivery Failure Scenarios (Development / Test Layer)', () => {
         basePayload,
         'officer-001',
         'DMC Duty Officer',
-        scenarioAOptions,
+        scenarioAOptions
       );
 
       expect(result.warningId).toBeDefined();
       expect(result.finalStatus).toBe('partially_failed');
 
       // Verify Push Channel Result
-      const pushRes = result.channelResults.find((r) => r.channel === 'push');
+      const pushRes = result.channelResults.find(r => r.channel === 'push');
       expect(pushRes?.status).toBe('Success');
       expect(pushRes?.deliveredCount).toBe(result.recipientCount);
       expect(pushRes?.failedCount).toBe(0);
 
       // Verify SMS Channel Result (Failed)
-      const smsRes = result.channelResults.find((r) => r.channel === 'sms');
+      const smsRes = result.channelResults.find(r => r.channel === 'sms');
       expect(smsRes?.status).toBe('Failed');
       expect(smsRes?.deliveredCount).toBe(0);
       expect(smsRes?.failedCount).toBe(result.recipientCount);
       expect(smsRes?.errorMessage).toContain('Cellular SMS Gateway Error');
 
       // Verify Audible Channel Result (Attempted & Succeeded)
-      const audibleRes = result.channelResults.find((r) => r.channel === 'audible');
+      const audibleRes = result.channelResults.find(r => r.channel === 'audible');
       expect(audibleRes?.status).toBe('Success');
       expect(audibleRes?.deliveredCount).toBe(result.recipientCount);
       expect(audibleRes?.failedCount).toBe(0);
@@ -120,7 +145,7 @@ describe('UC01 Delivery Failure Scenarios (Development / Test Layer)', () => {
         basePayload,
         'officer-001',
         'DMC Duty Officer',
-        scenarioBOptions,
+        scenarioBOptions
       );
 
       expect(result.warningId).toBeDefined();
@@ -128,7 +153,7 @@ describe('UC01 Delivery Failure Scenarios (Development / Test Layer)', () => {
 
       // Verify all 3 channels recorded as failed
       expect(result.channelResults.length).toBe(3);
-      result.channelResults.forEach((chRes) => {
+      result.channelResults.forEach(chRes => {
         expect(chRes.status).toBe('Failed');
         expect(chRes.deliveredCount).toBe(0);
         expect(chRes.failedCount).toBe(result.recipientCount);
@@ -137,7 +162,7 @@ describe('UC01 Delivery Failure Scenarios (Development / Test Layer)', () => {
 
       // Verify delivery logs preserved for audit
       expect(result.deliveryLogs.length).toBe(3);
-      result.deliveryLogs.forEach((log) => {
+      result.deliveryLogs.forEach(log => {
         expect(log.status).toBe('Failed');
         expect(log.warningId).toBe(result.warningId);
       });

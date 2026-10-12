@@ -12,11 +12,22 @@ import {
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import type { User, LoginCredentials, SignupData } from '@/types/auth';
+import { SRI_LANKAN_DISTRICTS } from '@/constants/districts';
 
 /**
  * Sign up a new user with email and password strictly in Firebase Auth and Cloud Firestore.
  */
 export async function signUp(data: SignupData): Promise<User> {
+  if (data.role !== 'citizen') {
+    throw new Error('Public registration is available to citizens only.');
+  }
+  if (!data.fullName.trim()) throw new Error('Full name is required.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email.trim())) {
+    throw new Error('Enter a valid email address.');
+  }
+  if (!SRI_LANKAN_DISTRICTS.some(district => district === data.district)) {
+    throw new Error('Select your district.');
+  }
   if (data.password !== data.confirmPassword) {
     throw new Error('Passwords do not match');
   }
@@ -26,20 +37,16 @@ export async function signUp(data: SignupData): Promise<User> {
   }
 
   // 1. Create user in Firebase Auth
-  const credential = await createUserWithEmailAndPassword(
-    auth,
-    data.email.trim(),
-    data.password,
-  );
+  const credential = await createUserWithEmailAndPassword(auth, data.email.trim(), data.password);
 
   const userProfile: User = {
     id: credential.user.uid,
     email: data.email.trim(),
     fullName: data.fullName.trim(),
-    role: data.role,
+    role: 'citizen',
     district: data.district || '',
     phone: data.phone || '',
-    organisation: data.organisation || '',
+    organisation: '',
     createdAt: new Date().toISOString(),
   };
 
@@ -62,33 +69,12 @@ export const profileCache = new Map<string, User>();
  * Sign in with email and password strictly via Firebase Auth and Cloud Firestore.
  */
 export async function signIn(credentials: LoginCredentials): Promise<User> {
-  let credential;
-  try {
-    credential = await signInWithEmailAndPassword(
-      auth,
-      credentials.email.trim(),
-      credentials.password,
-    );
-  } catch (error: unknown) {
-    const errCode = (error as { code?: string })?.code;
-    // If account has not been registered in Firebase Auth yet, auto-create account for seamless demo access
-    if (
-      (errCode === 'auth/user-not-found' || errCode === 'auth/invalid-credential') &&
-      credentials.password.length >= 6
-    ) {
-      try {
-        credential = await createUserWithEmailAndPassword(
-          auth,
-          credentials.email.trim(),
-          credentials.password,
-        );
-      } catch {
-        throw error;
-      }
-    } else {
-      throw error;
-    }
-  }
+  // Sign-in never creates accounts or infers privileged roles from an email address.
+  const credential = await signInWithEmailAndPassword(
+    auth,
+    credentials.email.trim(),
+    credentials.password
+  );
 
   const uid = credential.user.uid;
   if (profileCache.has(uid)) {
@@ -101,33 +87,10 @@ export async function signIn(credentials: LoginCredentials): Promise<User> {
     return profile;
   }
 
-  // If user authenticated in Firebase Auth but profile doc is missing in Firestore, create it
-  const defaultProfile: User = {
-    id: uid,
-    email: credential.user.email || credentials.email.trim(),
-    fullName: credential.user.displayName || credentials.email.split('@')[0],
-    role: credentials.email.includes('dmc')
-      ? 'dmc_officer'
-      : credentials.email.includes('district')
-      ? 'district_officer'
-      : credentials.email.includes('volunteer')
-      ? 'volunteer'
-      : 'citizen',
-    district: 'Colombo',
-    phone: '',
-    organisation: 'Disaster Management Centre',
-    createdAt: new Date().toISOString(),
-  };
-
-  profileCache.set(uid, defaultProfile);
-
-  // Background persist profile doc without blocking login
-  setDoc(doc(db, 'users', uid), {
-    ...defaultProfile,
-    createdAt: serverTimestamp(),
-  }).catch((err) => console.warn('Non-blocking user sync notice:', err));
-
-  return defaultProfile;
+  await firebaseSignOut(auth);
+  throw new Error(
+    'Your account profile is unavailable. Please try again or contact your administrator.'
+  );
 }
 
 /**
@@ -149,11 +112,11 @@ export async function getUserProfile(uid: string): Promise<User | null> {
   try {
     const fetchDoc = getDoc(doc(db, 'users', uid));
     // 2-second timeout protects against hanging WebChannel connections
-    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
+    const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), 2000));
     const snap = await Promise.race([fetchDoc, timeout]);
 
     if (snap && 'exists' in snap && snap.exists()) {
-      const user = snap.data() as User;
+      const user = { ...snap.data(), id: uid } as User;
       profileCache.set(uid, user);
       return user;
     }
@@ -166,9 +129,7 @@ export async function getUserProfile(uid: string): Promise<User | null> {
 /**
  * Listen to Firebase Auth state changes.
  */
-export function onAuthChanged(
-  callback: (user: FirebaseUser | null) => void,
-): () => void {
+export function onAuthChanged(callback: (user: FirebaseUser | null) => void): () => void {
   return onAuthStateChanged(auth, callback);
 }
 

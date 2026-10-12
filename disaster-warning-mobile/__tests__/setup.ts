@@ -15,7 +15,7 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
     delete asyncStorageStore[key];
   }),
   clear: jest.fn(async () => {
-    Object.keys(asyncStorageStore).forEach((k) => delete asyncStorageStore[k]);
+    Object.keys(asyncStorageStore).forEach(k => delete asyncStorageStore[k]);
   }),
   getAllKeys: jest.fn(async () => Object.keys(asyncStorageStore)),
 }));
@@ -41,7 +41,7 @@ jest.mock(
     })),
     deleteAsync: jest.fn(async () => {}),
   }),
-  { virtual: true },
+  { virtual: true }
 );
 
 // Expo ImageManipulator Mock
@@ -58,7 +58,7 @@ jest.mock(
       PNG: 'png',
     },
   }),
-  { virtual: true },
+  { virtual: true }
 );
 
 // Firebase Services Mock
@@ -75,7 +75,12 @@ jest.mock('firebase/firestore', () => ({
   getDoc: jest.fn(async () => ({ exists: () => false, data: () => null })),
   getDocs: jest.fn(async () => ({ docs: [] })),
   addDoc: jest.fn(async () => ({ id: 'mock-doc-id-123' })),
+  setDoc: jest.fn(async () => {}),
+  writeBatch: jest.fn(),
   updateDoc: jest.fn(async () => {}),
+  runTransaction: jest.fn(async (_db: unknown, callback: (transaction: unknown) => unknown) =>
+    callback({ get: jest.fn(), set: jest.fn(), update: jest.fn() })
+  ),
   query: jest.fn(() => ({})),
   where: jest.fn(() => ({})),
   serverTimestamp: jest.fn(() => '2026-10-09T08:00:00.000Z'),
@@ -102,6 +107,6 @@ globalThis.fetch = jest.fn(async () => ({
 
 // Clean storage between tests
 beforeEach(() => {
-  Object.keys(asyncStorageStore).forEach((k) => delete asyncStorageStore[k]);
+  Object.keys(asyncStorageStore).forEach(k => delete asyncStorageStore[k]);
   jest.clearAllMocks();
 });

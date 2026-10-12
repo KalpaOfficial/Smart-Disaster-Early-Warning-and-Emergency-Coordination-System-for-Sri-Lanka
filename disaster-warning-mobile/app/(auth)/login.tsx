@@ -1,8 +1,6 @@
-/**
- * Professional Mobile Login Screen — Command Center Access.
- * Features live emergency ops indicator, rapid credential selector, and biometric-ready design.
- */
-import React, { useState } from 'react';
+import { MobileTypography } from '@/constants/colors';
+/** Light-themed account sign-in for DisasterGuard. */
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,59 +8,58 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   TouchableOpacity,
+  TextInput,
+  ActivityIndicator,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Link } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
 import { ScreenContainer } from '@/components/ScreenContainer';
 import { Input } from '@/components/Input';
-import { Button } from '@/components/Button';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/colors';
+import { AuthHero } from '@/components/AuthHero';
+import { LightColors } from '@/constants/colors';
 
 export default function LoginScreen() {
   const { login } = useAuth();
+  const passwordRef = useRef<TextInput>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [signInError, setSignInError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const validate = (): boolean => {
-    const newErrors: typeof errors = {};
-
-    if (!email.trim()) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(email)) {
-      newErrors.email = 'Please enter a valid official email';
-    }
-
-    if (!password) {
-      newErrors.password = 'Password is required';
-    } else if (password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
   const handleLogin = async () => {
-    if (!validate()) return;
+    if (loading) return;
+    const newErrors: typeof errors = {};
+    if (!email.trim()) newErrors.email = 'Enter your email address.';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
+      newErrors.email = 'Enter a valid email address.';
+    if (!password) newErrors.password = 'Enter your password.';
+    setErrors(newErrors);
+    setSignInError(null);
+    if (Object.keys(newErrors).length) return;
 
     setLoading(true);
     try {
       await login({ email: email.trim(), password });
     } catch (error) {
-      Alert.alert('Authentication Failed', (error as Error).message);
+      setSignInError(
+        error instanceof Error ? error.message : 'Unable to sign in. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <ScreenContainer>
+    <ScreenContainer
+      style={styles.screen}
+      contentStyle={styles.shell}
+      edges={['top', 'bottom', 'left', 'right']}
+    >
+      <StatusBar style="light" />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.flex}
@@ -71,124 +68,109 @@ export default function LoginScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
         >
-          {/* Top Live Emergency Ops Ribbon */}
-          <View style={styles.opsTicker}>
-            <View style={styles.pulseDot} />
-            <Text style={styles.opsTickerText}>
-              DMC NATIONAL OPS • MONSOON FLOOD RESPONSE ACTIVE
-            </Text>
-          </View>
+          <View style={styles.content}>
+            <AuthHero />
 
-          {/* Hero Branding */}
-          <View style={styles.heroSection}>
-            <LinearGradient
-              colors={['#0284C7', '#0F172A']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.logoOrb}
-            >
-              <LinearGradient
-                colors={['#38BDF8', '#2563EB']}
-                style={styles.logoInner}
-              >
-                <Ionicons name="shield-half-outline" size={36} color="#FFFFFF" />
-              </LinearGradient>
-            </LinearGradient>
-
-            <Text style={styles.appName}>DisasterGuard</Text>
-            <Text style={styles.appSub}>
-              Early-Warning & Emergency Operations Command
-            </Text>
-            <View style={styles.countryPill}>
-              <Ionicons name="flag-outline" size={12} color="#38BDF8" />
-              <Text style={styles.countryText}>
-                Disaster Management Centre • Sri Lanka
-              </Text>
-            </View>
-          </View>
-
-          {/* Form Container */}
-          <View style={styles.formContainer}>
-            <View style={styles.formHeader}>
-              <Text style={styles.formTitle}>Operator Sign In</Text>
-              <Text style={styles.formDescription}>
-                Authenticate to access shelter, rescue, and relief operations
-              </Text>
-            </View>
-
-            <Input
-              label="Official Email"
-              placeholder="officer@dmc.gov.lk"
-              value={email}
-              onChangeText={(text) => {
-                setEmail(text);
-                if (errors.email) setErrors((e) => ({ ...e, email: undefined }));
-              }}
-              error={errors.email}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-              icon={<Ionicons name="mail-outline" size={18} color={Colors.accent.primary} />}
-            />
-
-            <Input
-              label="Password"
-              placeholder="Enter secure password"
-              value={password}
-              onChangeText={(text) => {
-                setPassword(text);
-                if (errors.password) setErrors((e) => ({ ...e, password: undefined }));
-              }}
-              error={errors.password}
-              isPassword
-              autoComplete="password"
-              icon={<Ionicons name="lock-closed-outline" size={18} color={Colors.accent.primary} />}
-            />
-
-            <Button
-              title="Authenticate & Enter Command"
-              onPress={handleLogin}
-              loading={loading}
-              fullWidth
-              size="lg"
-              icon={<Ionicons name="log-in-outline" size={20} color="#FFFFFF" />}
-              style={styles.submitBtn}
-            />
-
-            {/* Quick Demo Preset Button */}
-            <TouchableOpacity
-              style={styles.quickPresetBtn}
-              onPress={() => {
-                setEmail('dmc.officer@dmc.gov.lk');
-                setPassword('DmcOfficer123!');
-                setErrors({});
-              }}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="flash" size={14} color={Colors.accent.primary} />
-              <Text style={styles.quickPresetText}>Quick Fill DMC Duty Officer Credentials</Text>
-            </TouchableOpacity>
-
-            {/* Live Cloud Firebase Notice */}
-            <View style={styles.firebaseNoticeBox}>
-              <View style={styles.firebaseNoticeHeader}>
-                <Ionicons name="shield-checkmark" size={15} color={Colors.accent.primary} />
-                <Text style={styles.firebaseNoticeTitle}>SECURE FIREBASE AUTHENTICATION</Text>
+            <View style={styles.card}>
+              <View style={styles.heading}>
+                <Text accessibilityRole="header" style={styles.title}>
+                  Welcome back
+                </Text>
+                <Text style={styles.description}>Sign in to stay close to your community.</Text>
               </View>
-              <Text style={styles.firebaseNoticeDesc}>
-                Authentication connects directly to Google Cloud Firebase &amp; Firestore. First-time officer sign-ins automatically provision a DMC Officer profile.
-              </Text>
-            </View>
 
-            {/* Registration Footer */}
-            <View style={styles.footerRow}>
-              <Text style={styles.footerText}>Need official authorization? </Text>
-              <Link href="/(auth)/signup" asChild>
-                <TouchableOpacity activeOpacity={0.7}>
-                  <Text style={styles.signupLink}>Create Account</Text>
-                </TouchableOpacity>
-              </Link>
+              <Input
+                label="Email address"
+                placeholder="Enter your email address"
+                appearance="light"
+                value={email}
+                editable={!loading}
+                onChangeText={text => {
+                  setEmail(text);
+                  setErrors(current => ({ ...current, email: undefined }));
+                  setSignInError(null);
+                }}
+                error={errors.email}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="email"
+                textContentType="username"
+                returnKeyType="next"
+                submitBehavior="submit"
+                onSubmitEditing={() => passwordRef.current?.focus()}
+                icon={<Ionicons name="mail-outline" size={19} color={LightColors.mutedText} />}
+                containerStyle={styles.emailField}
+              />
+
+              <Input
+                label="Password"
+                placeholder="Enter your password"
+                appearance="light"
+                inputRef={passwordRef}
+                value={password}
+                editable={!loading}
+                onChangeText={text => {
+                  setPassword(text);
+                  setErrors(current => ({ ...current, password: undefined }));
+                  setSignInError(null);
+                }}
+                error={errors.password}
+                isPassword
+                autoComplete="current-password"
+                textContentType="password"
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="go"
+                onSubmitEditing={handleLogin}
+                icon={
+                  <Ionicons name="lock-closed-outline" size={19} color={LightColors.mutedText} />
+                }
+                containerStyle={styles.passwordField}
+              />
+
+              {signInError && (
+                <View
+                  style={styles.errorNotice}
+                  accessibilityRole="alert"
+                  accessibilityLiveRegion="polite"
+                >
+                  <Ionicons name="alert-circle-outline" size={19} color={LightColors.danger} />
+                  <Text style={styles.errorText}>{signInError}</Text>
+                </View>
+              )}
+
+              <TouchableOpacity
+                onPress={handleLogin}
+                disabled={loading}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={loading ? 'Signing in' : 'Sign in'}
+                accessibilityState={{ disabled: loading, busy: loading }}
+                style={[styles.signInButton, loading && styles.buttonLoading]}
+              >
+                {loading ? <ActivityIndicator size="small" color="#FFFFFF" /> : null}
+                <Text style={styles.signInButtonText}>{loading ? 'Signing in...' : 'Sign in'}</Text>
+                {!loading && <Ionicons name="arrow-forward" size={19} color="#FFFFFF" />}
+              </TouchableOpacity>
+
+              <View style={styles.divider} />
+              <View style={styles.registration}>
+                <Text style={styles.registrationText}>New to DisasterGuard?</Text>
+                <Link href="/(auth)/signup" asChild>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    disabled={loading}
+                    accessibilityRole="link"
+                    style={styles.createAccountLink}
+                  >
+                    <Text style={styles.createAccountText}>Create a citizen account</Text>
+                    <Ionicons name="chevron-forward" size={14} color={LightColors.primary} />
+                  </TouchableOpacity>
+                </Link>
+              </View>
             </View>
           </View>
         </ScrollView>
@@ -198,183 +180,78 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
+  flex: { flex: 1 },
+  screen: { backgroundColor: '#0855D9' },
+  shell: {
+    backgroundColor: LightColors.background,
+    borderColor: LightColors.border,
+    shadowOpacity: 0.06,
   },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: Spacing.xl,
-    paddingBottom: Spacing.xxxl * 2,
-    paddingTop: Spacing.md,
-  },
-  opsTicker: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
-    paddingVertical: Spacing.xs + 2,
-    paddingHorizontal: Spacing.md,
-    borderRadius: BorderRadius.full,
+  scrollContent: { flexGrow: 1, paddingBottom: 28 },
+  content: { width: '100%', alignSelf: 'center' },
+  card: {
+    backgroundColor: LightColors.surface,
+    padding: 24,
+    marginHorizontal: 20,
+    marginTop: -28,
+    borderRadius: 26,
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.25)',
-    alignSelf: 'center',
-    marginBottom: Spacing.xl,
-    gap: Spacing.sm,
-  },
-  pulseDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.danger,
-  },
-  opsTickerText: {
-    fontSize: FontSize.micro + 1,
-    fontWeight: '700',
-    color: '#FCA5A5',
-    letterSpacing: 0.6,
-  },
-  heroSection: {
-    alignItems: 'center',
-    marginBottom: Spacing.xxl,
-  },
-  logoOrb: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    padding: 3,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.md,
-    shadowColor: Colors.accent.primary,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    elevation: 8,
-  },
-  logoInner: {
-    width: 74,
-    height: 74,
-    borderRadius: 37,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  appName: {
-    fontSize: FontSize.xxxl,
-    fontWeight: '900',
-    color: Colors.text.primary,
-    letterSpacing: -0.5,
-  },
-  appSub: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  countryPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(56, 189, 248, 0.10)',
-    paddingVertical: Spacing.xs,
-    paddingHorizontal: Spacing.md,
-    borderRadius: BorderRadius.full,
-    marginTop: Spacing.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.22)',
-    gap: Spacing.xs,
-  },
-  countryText: {
-    fontSize: FontSize.micro + 1,
-    fontWeight: '700',
-    color: Colors.accent.primary,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  formContainer: {
-    backgroundColor: '#0F172A',
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.xl,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    shadowColor: '#000',
+    borderColor: '#EDF2FA',
+    shadowColor: '#154893',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.4,
-    shadowRadius: 20,
-    elevation: 8,
+    shadowOpacity: 0.09,
+    shadowRadius: 24,
+    elevation: 4,
   },
-  formHeader: {
-    marginBottom: Spacing.xl,
-  },
-  formTitle: {
-    fontSize: FontSize.xxl,
-    fontWeight: '800',
-    color: Colors.text.primary,
-    letterSpacing: -0.3,
-  },
-  formDescription: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-    marginTop: 4,
-    lineHeight: 18,
-  },
-  submitBtn: {
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  quickPresetBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.xs,
-    backgroundColor: 'rgba(56, 189, 248, 0.10)',
-    paddingVertical: Spacing.sm + 2,
-    paddingHorizontal: Spacing.md,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.25)',
-    marginBottom: Spacing.lg,
-  },
-  quickPresetText: {
-    fontSize: FontSize.xs,
-    fontWeight: '800',
-    color: Colors.accent.primary,
-  },
-  firebaseNoticeBox: {
-    backgroundColor: '#0A1322',
-    borderRadius: BorderRadius.md,
-    padding: Spacing.md,
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.20)',
-    marginBottom: Spacing.xl,
-  },
-  firebaseNoticeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    marginBottom: 4,
-  },
-  firebaseNoticeTitle: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: Colors.accent.primary,
-    letterSpacing: 0.8,
-  },
-  firebaseNoticeDesc: {
-    fontSize: FontSize.xs,
-    color: Colors.text.tertiary,
-    lineHeight: 16,
-  },
-  footerRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: Spacing.xs,
-  },
-  footerText: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-  },
-  signupLink: {
-    fontSize: FontSize.sm,
+  heading: { marginBottom: 24 },
+  title: {
+    color: LightColors.text,
+    fontSize: 28,
+    lineHeight: 36,
     fontWeight: '700',
-    color: Colors.accent.primary,
+    letterSpacing: -0.7,
+    marginBottom: 8,
   },
+  description: { color: LightColors.secondaryText, ...MobileTypography.body },
+  emailField: { marginBottom: 20 },
+  passwordField: { marginBottom: 24 },
+  errorNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    borderRadius: 10,
+    backgroundColor: LightColors.dangerSoft,
+    padding: 12,
+    marginBottom: 16,
+  },
+  errorText: { flex: 1, color: LightColors.danger, ...MobileTypography.caption },
+  signInButton: {
+    minHeight: 54,
+    borderRadius: 16,
+    shadowColor: '#0066FF',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 3,
+    backgroundColor: LightColors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 15,
+    paddingHorizontal: 16,
+  },
+  buttonLoading: { backgroundColor: LightColors.primaryPressed },
+  signInButtonText: { color: '#FFFFFF', ...MobileTypography.button, fontWeight: '600' },
+  divider: { height: 1, backgroundColor: '#EDF1F7', marginTop: 28, marginBottom: 16 },
+  registration: { alignItems: 'center' },
+  registrationText: { color: LightColors.secondaryText, ...MobileTypography.caption },
+  createAccountLink: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+  createAccountText: { color: LightColors.primary, ...MobileTypography.button, fontWeight: '600' },
 });

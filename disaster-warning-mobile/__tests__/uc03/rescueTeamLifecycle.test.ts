@@ -1,3 +1,8 @@
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+jest.mock('@/services/resourceAuthorization', () => ({
+  requireDistrictOfficer: jest.fn(async () => 'district-officer'),
+  requireActiveResourceEvent: jest.fn(async () => {}),
+}));
 /**
  * Unit Tests for UC03 Rescue Team Lifecycle, State Machine & Availability Guard.
  *
@@ -9,13 +14,16 @@
  */
 import { dispatchTeam, updateTeamStatus } from '@/services/rescueTeamService';
 import { updateDoc } from 'firebase/firestore';
-import type { RescueTeam, TeamStatus } from '@/types/resources';
+import type { RescueTeam } from '@/types/resources';
 
 describe('UC03: Rescue Team Lifecycle & Operational State Machine', () => {
   const teamId = 'team-sl-army-dr-01';
 
   beforeEach(() => {
     jest.clearAllMocks();
+    installResourceFirestore({
+      'rescueTeams/team-sl-army-dr-01': { status: 'available', district: 'Ratnapura' },
+    });
   });
 
   describe('Full Operational Mission Lifecycle', () => {
@@ -28,7 +36,7 @@ describe('UC03: Rescue Team Lifecycle & Operational State Machine', () => {
           status: 'dispatched',
           assignedLocation: 'Pelmadulla Landslide Sector',
           hazardEventId: 'event-monsoon-2026',
-        }),
+        })
       );
 
       // 2. Unit departs base: en_route
@@ -37,7 +45,7 @@ describe('UC03: Rescue Team Lifecycle & Operational State Machine', () => {
         expect.anything(),
         expect.objectContaining({
           status: 'en_route',
-        }),
+        })
       );
 
       // 3. Unit arrives at operational sector: on_site
@@ -46,7 +54,7 @@ describe('UC03: Rescue Team Lifecycle & Operational State Machine', () => {
         expect.anything(),
         expect.objectContaining({
           status: 'on_site',
-        }),
+        })
       );
 
       // 4. SAR evacuation complete: completed (clears assignedLocation)
@@ -56,7 +64,7 @@ describe('UC03: Rescue Team Lifecycle & Operational State Machine', () => {
         expect.objectContaining({
           status: 'completed',
           assignedLocation: '',
-        }),
+        })
       );
 
       // 5. Unit returns to base and stands down: available
@@ -66,7 +74,7 @@ describe('UC03: Rescue Team Lifecycle & Operational State Machine', () => {
         expect.objectContaining({
           status: 'available',
           assignedLocation: '',
-        }),
+        })
       );
     });
   });
@@ -108,7 +116,7 @@ describe('UC03: Rescue Team Lifecycle & Operational State Machine', () => {
         expect.objectContaining({
           status: 'available',
           assignedLocation: '',
-        }),
+        })
       );
     });
   });
@@ -121,11 +129,14 @@ describe('UC03: Rescue Team Lifecycle & Operational State Machine', () => {
         expect.anything(),
         expect.objectContaining({
           status: 'unavailable',
-        }),
+        })
       );
     });
 
     it('restores unit back to "available" when maintenance is completed', async () => {
+      installResourceFirestore({
+        ['rescueTeams/' + teamId]: { status: 'unavailable', district: 'Ratnapura' },
+      });
       await updateTeamStatus(teamId, 'available');
 
       expect(updateDoc).toHaveBeenLastCalledWith(
@@ -133,7 +144,7 @@ describe('UC03: Rescue Team Lifecycle & Operational State Machine', () => {
         expect.objectContaining({
           status: 'available',
           assignedLocation: '',
-        }),
+        })
       );
     });
   });

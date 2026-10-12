@@ -1,3 +1,6 @@
+import { auth } from '@/services/firebase';
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+let store: ReturnType<typeof installResourceFirestore>;
 import {
   submitGroundReport,
   verifyReport,
@@ -51,6 +54,19 @@ describe('UC02: Ground Report Service CRUD & Officer Workflows', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    Object.assign(auth, { currentUser: { uid: 'officer-dmc-88' } });
+    store = installResourceFirestore({
+      'users/officer-dmc-88': { role: 'dmc_officer' },
+      'groundReports/rep-123': { status: 'pending_verification', submitterId: 'user-cit-441' },
+      'hazardEvents/event-kelani-flood': {
+        status: 'active',
+        title: 'Kelani River Flood Inundation',
+      },
+      'hazardEvents/event-flood-2026': {
+        status: 'active',
+        title: 'Severe Monsoon Flood - Western Province',
+      },
+    });
   });
 
   describe('Report Submission (UC02 Main Flow Steps 8-12)', () => {
@@ -59,11 +75,11 @@ describe('UC02: Ground Report Service CRUD & Officer Workflows', () => {
         sampleReportData,
         'https://storage.firebase/uploaded.jpg',
         'ground-reports/path.jpg',
-        citizenActor,
+        citizenActor
       );
 
       expect(result).toBeDefined();
-      expect(result.id).toBe('mock-doc-id-123');
+      expect(result.id).toBe('generated-1');
       expect(result.referenceNumber).toMatch(/^GR-\d{8}-\d{4}$/);
       expect(addDoc).toHaveBeenCalledTimes(1);
     });
@@ -73,7 +89,7 @@ describe('UC02: Ground Report Service CRUD & Officer Workflows', () => {
         sampleReportData,
         'https://storage.firebase/uploaded.jpg',
         'ground-reports/path.jpg',
-        volunteerActor,
+        volunteerActor
       );
 
       expect(result).toBeDefined();
@@ -87,8 +103,8 @@ describe('UC02: Ground Report Service CRUD & Officer Workflows', () => {
           sampleReportData,
           'https://storage.firebase/uploaded.jpg',
           'ground-reports/path.jpg',
-          { id: 'officer-1', fullName: 'Officer Silva', role: 'dmc_officer' },
-        ),
+          { id: 'officer-1', fullName: 'Officer Silva', role: 'dmc_officer' }
+        )
       ).rejects.toThrow(/Unauthorized/);
       expect(addDoc).not.toHaveBeenCalled();
     });
@@ -99,8 +115,8 @@ describe('UC02: Ground Report Service CRUD & Officer Workflows', () => {
           sampleReportData,
           'https://storage.firebase/uploaded.jpg',
           'ground-reports/path.jpg',
-          { id: 'officer-2', fullName: 'District Agent', role: 'district_officer' },
-        ),
+          { id: 'officer-2', fullName: 'District Agent', role: 'district_officer' }
+        )
       ).rejects.toThrow(/Unauthorized/);
       expect(addDoc).not.toHaveBeenCalled();
     });
@@ -123,8 +139,8 @@ describe('UC02: Ground Report Service CRUD & Officer Workflows', () => {
         verifyReport(
           'rep-123',
           { uid: citizenActor.id, name: citizenActor.fullName, role: 'citizen' },
-          { decisionNote: 'Attempted unauthorized verification' },
-        ),
+          { decisionNote: 'Attempted unauthorized verification' }
+        )
       ).rejects.toThrow(/Unauthorized/);
       expect(updateDoc).not.toHaveBeenCalled();
     });
@@ -135,7 +151,7 @@ describe('UC02: Ground Report Service CRUD & Officer Workflows', () => {
       await rejectReport(
         'rep-123',
         dmcOfficerActor,
-        'Old photograph re-submitted; current water level at site is normal.',
+        'Old photograph re-submitted; current water level at site is normal.'
       );
 
       expect(updateDoc).toHaveBeenCalledTimes(1);
@@ -146,8 +162,8 @@ describe('UC02: Ground Report Service CRUD & Officer Workflows', () => {
         rejectReport(
           'rep-123',
           { uid: citizenActor.id, name: citizenActor.fullName, role: 'citizen' },
-          'No authority',
-        ),
+          'No authority'
+        )
       ).rejects.toThrow(/Unauthorized/);
       expect(updateDoc).not.toHaveBeenCalled();
     });
@@ -158,16 +174,21 @@ describe('UC02: Ground Report Service CRUD & Officer Workflows', () => {
       await requestAdditionalInfo(
         'rep-123',
         dmcOfficerActor,
-        'Please confirm if water is currently receding or continuing to rise.',
+        'Please confirm if water is currently receding or continuing to rise.'
       );
 
       expect(updateDoc).toHaveBeenCalledTimes(1);
     });
 
     it('allows submitter to submit additional info and return report to pending verification queue', async () => {
+      Object.assign(auth, { currentUser: { uid: 'user-cit-441' } });
+      store.seed('groundReports/rep-123', {
+        status: 'info_requested',
+        submitterId: 'user-cit-441',
+      });
       await submitAdditionalInfo(
         'rep-123',
-        'Water level is still rising at approximately 2 inches per hour.',
+        'Water level is still rising at approximately 2 inches per hour.'
       );
 
       expect(updateDoc).toHaveBeenCalledTimes(1);
@@ -176,21 +197,26 @@ describe('UC02: Ground Report Service CRUD & Officer Workflows', () => {
 
   describe('Hazard Event Linking (UC02 Phase 7.1)', () => {
     it('updates report document with linked hazard event reference', async () => {
+      store.seed('groundReports/rep-123', { status: 'verified', submitterId: 'user-cit-441' });
       await linkReportToHazardEvent(
         'rep-123',
         'event-flood-2026',
-        'Severe Monsoon Flood - Western Province',
+        'Severe Monsoon Flood - Western Province'
       );
 
       expect(updateDoc).toHaveBeenCalledTimes(1);
     });
 
     it('can unlink hazard event by passing null references', async () => {
+      store.seed('groundReports/rep-123', { status: 'verified', submitterId: 'user-cit-441' });
       await linkReportToHazardEvent('rep-123', null, null);
-      expect(updateDoc).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-        hazardEventId: null,
-        hazardEventTitle: null,
-      }));
+      expect(updateDoc).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          hazardEventId: null,
+          hazardEventTitle: null,
+        })
+      );
     });
   });
 

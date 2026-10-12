@@ -21,17 +21,14 @@ export interface HazardEvent {
   affectedRiverBasins?: string[];
   warningLevel?: string;
   startDate: string;
+  closedAt?: string;
   description: string;
 }
 
 // --- Shelter ---
 
 export type ShelterFacilityType =
-  | 'school'
-  | 'community_hall'
-  | 'temple'
-  | 'stadium'
-  | 'government_building';
+  'school' | 'community_hall' | 'temple' | 'stadium' | 'government_building';
 
 export type ShelterStatus = 'registered' | 'active' | 'inactive' | 'over_capacity';
 
@@ -55,6 +52,14 @@ export interface Shelter {
   createdBy: string;
   createdAt: string;
   updatedAt?: string;
+  occupancyHistory?: {
+    hazardEventId?: string;
+    district?: string;
+    timestamp: string;
+    occupancy: number;
+    capacity: number;
+    recordedBy?: string;
+  }[];
 }
 
 export interface CreateShelterData {
@@ -75,12 +80,7 @@ export interface CreateShelterData {
 // --- Rescue Team ---
 
 export type TeamStatus =
-  | 'available'
-  | 'dispatched'
-  | 'en_route'
-  | 'on_site'
-  | 'completed'
-  | 'unavailable';
+  'available' | 'dispatched' | 'en_route' | 'on_site' | 'completed' | 'unavailable';
 
 export interface RescueTeam {
   id: string;
@@ -126,6 +126,7 @@ export interface ReliefSupply {
   createdBy: string;
   createdAt: string;
   updatedAt?: string;
+  availability?: 'available' | 'withdrawn';
 }
 
 export interface CreateReliefSupplyData {
@@ -152,6 +153,9 @@ export interface Distribution {
   distributedBy: string;
   hazardEventId: string;
   distributedAt: string;
+  supplyType?: SupplyType;
+  organisationType?: OrganisationType;
+  organisationName?: string;
 }
 
 export interface CreateDistributionData {

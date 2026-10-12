@@ -2,7 +2,7 @@
  * Professional Form Modal Component.
  * Slides up from the bottom with responsive mobile bounds and tactile header.
  */
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Modal as RNModal,
   View,
@@ -14,48 +14,76 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, BorderRadius, FontSize, Spacing } from '@/constants/colors';
+import { Colors, LightColors, BorderRadius, Spacing } from '@/constants/colors';
 
 interface FormModalProps {
   visible: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  appearance?: 'dark' | 'light';
+  scrollable?: boolean;
+  feedbackKey?: number;
 }
 
-export function FormModal({ visible, onClose, title, children }: FormModalProps) {
+export function FormModal({
+  visible,
+  onClose,
+  title,
+  children,
+  appearance = 'dark',
+  scrollable = true,
+  feedbackKey,
+}: FormModalProps) {
+  const light = appearance === 'light';
+  const scroll = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (visible && feedbackKey) scroll.current?.scrollTo({ y: 0, animated: true });
+  }, [feedbackKey, visible]);
   return (
-    <RNModal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
+    <RNModal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.overlay}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <TouchableOpacity
-          style={styles.backdrop}
-          activeOpacity={1}
-          onPress={onClose}
-        />
-        <View style={styles.sheet}>
-          <View style={styles.handle} />
+        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
+        <View
+          style={[
+            styles.sheet,
+            !scrollable && { height: '88%' },
+            light && {
+              backgroundColor: LightColors.surface,
+              borderColor: LightColors.border,
+              shadowOpacity: 0.12,
+            },
+          ]}
+        >
+          <View style={[styles.handle, light && { backgroundColor: LightColors.border }]} />
           <View style={styles.header}>
-            <Text style={styles.title}>{title}</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton} activeOpacity={0.7}>
+            <Text style={[styles.title, light && { color: LightColors.text }]}>{title}</Text>
+            <TouchableOpacity
+              onPress={onClose}
+              style={styles.closeButton}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Close modal"
+            >
               <Ionicons name="close" size={18} color={Colors.text.secondary} />
             </TouchableOpacity>
           </View>
-          <ScrollView
-            style={styles.content}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {children}
-            <View style={styles.bottomPadding} />
-          </ScrollView>
+          {scrollable ? (
+            <ScrollView
+              ref={scroll}
+              style={styles.content}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {children}
+              <View style={styles.bottomPadding} />
+            </ScrollView>
+          ) : (
+            <View style={styles.customContent}>{children}</View>
+          )}
         </View>
       </KeyboardAvoidingView>
     </RNModal>
@@ -107,7 +135,10 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
   title: {
-    fontSize: FontSize.lg,
+    fontSize: 20,
+    lineHeight: 28,
+    flex: 1,
+    marginRight: 12,
     fontWeight: '700',
     color: Colors.text.primary,
     letterSpacing: -0.2,
@@ -124,6 +155,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.lg,
   },
+  customContent: { flex: 1, minHeight: 0 },
   bottomPadding: {
     height: Spacing.xxxl,
   },

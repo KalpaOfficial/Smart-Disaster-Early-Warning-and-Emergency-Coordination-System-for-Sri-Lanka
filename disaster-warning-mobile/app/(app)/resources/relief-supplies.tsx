@@ -1,3 +1,15 @@
+import { AppAlert } from '@/utils/appNotice';
+import { useFormFeedback } from '@/hooks/useFormFeedback';
+import {
+  requiredFields,
+  positiveQuantityError,
+  officerDistrictError,
+} from '@/utils/formValidation';
+import { FormError } from '@/components/FormError';
+import { MobileTypography } from '@/constants/colors';
+import { ResourceColors as Colors } from '@/components/ResourceComponents';
+import { ResourceDirectoryHeader } from '@/components/ResourceDirectoryHeader';
+import { canCoordinateResources } from '@/constants/resourcePermissions';
 /**
  * Relief Supplies Management Screen — UC03 Steps 57–62 + Alternate/Exception Flows.
  * Real-time warehouse telemetry, strict overdraft validation, and distribution log.
@@ -9,30 +21,29 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Alert,
   RefreshControl,
-  ScrollView,
+  ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { ScreenContainer } from '@/components/ScreenContainer';
-import { Card } from '@/components/Card';
-import { Button } from '@/components/Button';
-import { Input } from '@/components/Input';
-import { Select } from '@/components/Select';
-import { SupplyTypeBadge, OrganisationBadge } from '@/components/Badge';
-import { ProgressBar } from '@/components/ProgressBar';
-import { FormModal } from '@/components/FormModal';
-import { EmptyState } from '@/components/EmptyState';
-import { MobileNavBar } from '@/components/MobileNavBar';
+import { ScreenContainer } from '@/components/ResourceComponents';
+import { Card } from '@/components/ResourceComponents';
+import { Button } from '@/components/ResourceComponents';
+import { Input } from '@/components/ResourceComponents';
+import { Select } from '@/components/ResourceComponents';
+import { StatusBar } from 'expo-status-bar';
+import { FormModal } from '@/components/ResourceComponents';
+import { EmptyState } from '@/components/ResourceComponents';
+import { MobileNavBar } from '@/components/ResourceComponents';
 import { useAuth } from '@/hooks/useAuth';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/colors';
+import { Spacing, BorderRadius } from '@/constants/colors';
 import { SRI_LANKAN_DISTRICTS, ORGANISATION_TYPES, SUPPLY_TYPES } from '@/constants/districts';
 import {
   getSupplies,
   createSupply,
   distributeSupply,
   getDistributions,
+  setSupplyAvailability,
 } from '@/services/reliefSupplyService';
 import { getActiveEvents } from '@/services/hazardEventService';
 import type {
@@ -46,21 +57,37 @@ import type {
 } from '@/types/resources';
 
 const SUPPLY_FILTERS: { label: string; value: SupplyType | 'all' }[] = [
-  { label: 'All Commodities', value: 'all' },
-  { label: 'Food Rations', value: 'food' },
-  { label: 'Drinking Water', value: 'water' },
-  { label: 'Trauma Medicine', value: 'medicine' },
+  { label: 'All supplies', value: 'all' },
+  { label: 'Food', value: 'food' },
+  { label: 'Water', value: 'water' },
+  { label: 'Medicine', value: 'medicine' },
   { label: 'Blankets', value: 'blankets' },
-  { label: 'Family Tents', value: 'tents' },
+  { label: 'Tents', value: 'tents' },
 ];
 
+const SUPPLY_THEME: Record<
+  SupplyType,
+  { label: string; color: string; background: string; icon: keyof typeof Ionicons.glyphMap }
+> = {
+  food: { label: 'Food', color: '#A85E00', background: '#FFF4DF', icon: 'restaurant-outline' },
+  water: { label: 'Water', color: '#075ADB', background: '#EAF2FF', icon: 'water-outline' },
+  medicine: { label: 'Medicine', color: '#B43545', background: '#FFF0F2', icon: 'medkit-outline' },
+  blankets: { label: 'Blankets', color: '#7043AE', background: '#F2ECFC', icon: 'bed-outline' },
+  tents: { label: 'Tents', color: '#07834B', background: '#E5F7ED', icon: 'home-outline' },
+};
+
 export default function ReliefSuppliesScreen() {
-  const router = useRouter();
+  const compact = useWindowDimensions().width < 380;
   const { state: authState } = useAuth();
+  const canManage = canCoordinateResources(authState.user?.role);
+  const scopeDistrict = canManage ? authState.user?.district : undefined;
   const [supplies, setSupplies] = useState<ReliefSupply[]>([]);
   const [distributions, setDistributions] = useState<Distribution[]>([]);
   const [events, setEvents] = useState<HazardEvent[]>([]);
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<SupplyType | 'all'>('all');
+  const [search, setSearch] = useState('');
+  const [districtFilter, setDistrictFilter] = useState(authState.user?.district || '');
+  const [organisationFilter, setOrganisationFilter] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -77,33 +104,37 @@ export default function ReliefSuppliesScreen() {
     unit: 'packs',
     organisationName: '',
     organisationType: 'ngo' as OrganisationType,
-    district: 'Ratnapura',
+    district: authState.user?.district || '',
   });
 
   const [distForm, setDistForm] = useState({
     quantity: '',
-    destinationDistrict: 'Ratnapura',
+    destinationDistrict: authState.user?.district || '',
     destinationLocation: '',
     details: '',
   });
   const [submitting, setSubmitting] = useState(false);
+  const stockFeedback = useFormFeedback(form, showAddSupply);
+  const distributionFeedback = useFormFeedback(distForm, showDistribute?.id);
 
   const loadData = useCallback(async () => {
     try {
-      const [s, d, e] = await Promise.all([
-        getSupplies(),
-        getDistributions(),
-        getActiveEvents(),
-      ]);
-      setSupplies(s);
-      setDistributions(d);
-      setEvents(e);
+      const [s, d, e] = await Promise.all([getSupplies(), getDistributions(), getActiveEvents()]);
+      setSupplies(s.filter(supply => !scopeDistrict || supply.district === scopeDistrict));
+      setDistributions(
+        d.filter(
+          distribution => !scopeDistrict || distribution.destinationDistrict === scopeDistrict
+        )
+      );
+      setEvents(
+        e.filter(event => !scopeDistrict || event.affectedDistricts.includes(scopeDistrict))
+      );
     } catch (_error) {
-      Alert.alert('Notice', 'Could not refresh inventory records. Please check network.');
+      AppAlert.alert('Notice', 'Could not refresh inventory records. Please check network.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scopeDistrict]);
 
   useEffect(() => {
     loadData();
@@ -123,21 +154,31 @@ export default function ReliefSuppliesScreen() {
       unit: 'packs',
       organisationName: '',
       organisationType: 'ngo',
-      district: 'Ratnapura',
+      district: authState.user?.district || '',
     });
   };
 
   const handleAddSupply = async () => {
-    if (!form.itemName || !form.type || !form.totalQuantity || !form.unit || !form.organisationName || !form.district) {
-      Alert.alert('Validation Error', 'Please complete all mandatory inventory fields.');
-      return;
-    }
-
-    const qty = parseInt(form.totalQuantity, 10);
-    if (isNaN(qty) || qty <= 0) {
-      Alert.alert('Validation Error', 'Total quantity must be greater than zero.');
-      return;
-    }
+    if (!canManage || submitting) return;
+    stockFeedback.setError('');
+    const errors = requiredFields(form, {
+      itemName: 'Item name',
+      type: 'Category',
+      totalQuantity: 'Quantity',
+      unit: 'Unit',
+      organisationName: 'Organisation name',
+      district: 'Storage district',
+      organisationType: 'Organisation type',
+    });
+    const quantityError = positiveQuantityError(form.totalQuantity, 'Quantity');
+    if (quantityError) errors.totalQuantity = quantityError;
+    const districtError = officerDistrictError(form.district, scopeDistrict);
+    if (districtError) errors.district = districtError;
+    if (!events.some(event => event.affectedDistricts.includes(form.district)) && !errors.district)
+      errors.district = `No active hazard event covers ${form.district || 'this district'}. Ask a DMC Officer to create or activate an event before adding stock.`;
+    stockFeedback.setErrors(errors);
+    if (Object.keys(errors).length) return;
+    const qty = Number(form.totalQuantity);
 
     setSubmitting(true);
     try {
@@ -151,44 +192,45 @@ export default function ReliefSuppliesScreen() {
         district: form.district,
       };
 
-      await createSupply(
-        data,
-        authState.user?.id || 'officer',
-        events.length > 0 ? events[0].id : 'event-monsoon-2026',
-      );
-      Alert.alert('Inventory Added', `"${form.itemName}" recorded with ${qty} units.`);
+      const event = events.find(event => event.affectedDistricts.includes(data.district));
+      if (!event) throw new Error('Select a depot district covered by an active hazard event.');
+      await createSupply(data, authState.user?.id || 'officer', event.id);
+      AppAlert.alert('Inventory Added', `"${form.itemName}" recorded with ${qty} units.`);
       setShowAddSupply(false);
       resetAddForm();
       loadData();
     } catch (error) {
-      Alert.alert('Error', (error as Error).message);
+      stockFeedback.setError((error as Error).message || 'Could not add stock. Please try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDistribute = async () => {
+    if (!canManage || submitting) return;
     if (!showDistribute) return;
-
-    const qty = parseInt(distForm.quantity, 10);
-    if (isNaN(qty) || qty <= 0) {
-      Alert.alert('Validation Error', 'Please specify a valid positive dispatch quantity.');
-      return;
-    }
-
-    // UC03 Strict Validation: Insufficient stock overdraft guard
-    if (qty > showDistribute.remainingQuantity) {
-      Alert.alert(
-        'Insufficient Inventory (UC03 Exception)',
-        `Requested dispatch quantity (${qty} ${showDistribute.unit}) exceeds available depot balance (${showDistribute.remainingQuantity} ${showDistribute.unit}). Transaction denied.`,
-      );
-      return;
-    }
-
-    if (!distForm.destinationLocation.trim()) {
-      Alert.alert('Validation Error', 'Target distribution camp or facility is required.');
-      return;
-    }
+    distributionFeedback.setError('');
+    const errors = requiredFields(distForm, {
+      quantity: 'Distribution quantity',
+      destinationDistrict: 'Destination district',
+      destinationLocation: 'Delivery location',
+    });
+    const quantityError = positiveQuantityError(distForm.quantity, 'Distribution quantity');
+    if (quantityError) errors.quantity = quantityError;
+    const qty = Number(distForm.quantity);
+    if (!quantityError && qty > showDistribute.remainingQuantity)
+      errors.quantity = `Only ${showDistribute.remainingQuantity} ${showDistribute.unit} remain. Enter a quantity within the available balance.`;
+    if (
+      !errors.destinationDistrict &&
+      !events.some(
+        event =>
+          event.affectedDistricts.includes(showDistribute.district) &&
+          event.affectedDistricts.includes(distForm.destinationDistrict)
+      )
+    )
+      errors.destinationDistrict = `Stock in ${showDistribute.district} can be sent to ${distForm.destinationDistrict} only when one active hazard event covers both districts. Select a covered district or ask a DMC Officer to update the event.`;
+    distributionFeedback.setErrors(errors);
+    if (Object.keys(errors).length) return;
 
     setSubmitting(true);
     try {
@@ -202,83 +244,139 @@ export default function ReliefSuppliesScreen() {
         details: distForm.details.trim() || 'Direct field relief convoy',
       };
 
-      await distributeSupply(
-        distData,
-        authState.user?.id || 'officer',
-        events.length > 0 ? events[0].id : 'event-monsoon-2026',
-      );
-      Alert.alert(
+      const event =
+        events.find(
+          event =>
+            event.id === showDistribute.hazardEventId &&
+            event.affectedDistricts.includes(showDistribute.district) &&
+            event.affectedDistricts.includes(distData.destinationDistrict)
+        ) ||
+        events.find(
+          event =>
+            event.affectedDistricts.includes(showDistribute.district) &&
+            event.affectedDistricts.includes(distData.destinationDistrict)
+        );
+      if (!event)
+        throw new Error(
+          'The depot and destination must be covered by the same active hazard event.'
+        );
+      await distributeSupply(distData, authState.user?.id || 'officer', event.id);
+      AppAlert.alert(
         'Dispatch Recorded',
-        `Successfully logged distribution of ${qty} ${showDistribute.unit} to "${distForm.destinationLocation}".`,
+        `Successfully logged distribution of ${qty} ${showDistribute.unit} to "${distForm.destinationLocation}".`
       );
       setShowDistribute(null);
       loadData();
     } catch (error) {
-      Alert.alert('Distribution Error', (error as Error).message);
+      distributionFeedback.setError(
+        (error as Error).message || 'Could not record the distribution. Please try again.'
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
-  const filteredSupplies = supplies.filter((s) => {
-    if (selectedTypeFilter === 'all') return true;
-    return s.type === selectedTypeFilter;
+  const handleAvailability = async (item: ReliefSupply) => {
+    if (!canManage || submitting) return;
+    setSubmitting(true);
+    try {
+      await setSupplyAvailability(
+        item.id,
+        item.availability === 'withdrawn' ? 'available' : 'withdrawn'
+      );
+      await loadData();
+    } catch (error) {
+      AppAlert.alert('Could not update availability', (error as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const filteredSupplies = supplies.filter(item => {
+    const matchesSearch =
+      !search.trim() ||
+      [item.itemName, item.unit, item.organisationName, item.district]
+        .join(' ')
+        .toLowerCase()
+        .includes(search.trim().toLowerCase());
+    return (
+      matchesSearch &&
+      (!districtFilter || item.district === districtFilter) &&
+      (!organisationFilter || item.organisationType === organisationFilter) &&
+      (selectedTypeFilter === 'all' || item.type === selectedTypeFilter)
+    );
   });
 
   return (
     <ScreenContainer>
-      {/* Top Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton} activeOpacity={0.7}>
-          <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
-        </TouchableOpacity>
-        <View style={styles.headerTitleGroup}>
-          <Text style={styles.headerTitle}>Relief Supplies</Text>
-          <Text style={styles.headerSubtitle}>
-            {supplies.reduce((acc, s) => acc + s.remainingQuantity, 0).toLocaleString()} Units in Warehouses
-          </Text>
-        </View>
-        <TouchableOpacity onPress={() => setShowHistory(true)} style={styles.historyBtn} activeOpacity={0.7}>
-          <Ionicons name="receipt-outline" size={18} color={Colors.accent.primary} />
-        </TouchableOpacity>
-        <Button
-          title="Add Stock"
-          variant="primary"
-          size="sm"
-          icon={<Ionicons name="add" size={16} color="#FFFFFF" />}
-          onPress={() => setShowAddSupply(true)}
-        />
-      </View>
-
-      {/* Commodity Type Filters */}
-      <View style={styles.filterSection}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          {SUPPLY_FILTERS.map((tab) => {
-            const count = tab.value === 'all'
-              ? supplies.length
-              : supplies.filter((s) => s.type === tab.value).length;
-            const active = selectedTypeFilter === tab.value;
-
-            return (
-              <TouchableOpacity
-                key={tab.value}
-                onPress={() => setSelectedTypeFilter(tab.value)}
-                style={[styles.filterChip, active && styles.filterChipActive]}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
-                  {tab.label} ({count})
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
-
+      <StatusBar style="light" />
       {/* Supplies List */}
       <FlatList
+        showsVerticalScrollIndicator={false}
         data={filteredSupplies}
-        keyExtractor={(item) => item.id}
+        keyExtractor={item => item.id}
+        ListHeaderComponent={
+          <ResourceDirectoryHeader
+            title={canManage ? 'Manage relief supplies' : 'Relief supplies'}
+            description="Track relief stock and record deliveries to affected communities."
+            icon="cube-outline"
+            search={search}
+            onSearch={setSearch}
+            placeholder="Search item, organisation or unit"
+            action={
+              canManage
+                ? { title: 'Add relief stock', onPress: () => setShowAddSupply(true) }
+                : undefined
+            }
+            secondaryAction={{
+              title: 'View distribution history',
+              onPress: () => setShowHistory(true),
+            }}
+            directoryTitle="Relief stock directory"
+            count={filteredSupplies.length}
+            loading={loading}
+          >
+            <View style={[styles.filterRow, compact && { flexDirection: 'column' }]}>
+              <Select
+                value={districtFilter}
+                onSelect={setDistrictFilter}
+                options={[
+                  { value: '', label: 'All districts' },
+                  ...SRI_LANKAN_DISTRICTS.map(d => ({ value: d, label: d })),
+                ]}
+                containerStyle={styles.filterSelect}
+              />
+              <Select
+                value={organisationFilter}
+                onSelect={setOrganisationFilter}
+                options={[{ value: '', label: 'Any organisation' }, ...ORGANISATION_TYPES]}
+                containerStyle={styles.filterSelect}
+              />
+            </View>
+            <View style={styles.tabs}>
+              {SUPPLY_FILTERS.map(tab => {
+                const count =
+                  tab.value === 'all'
+                    ? supplies.length
+                    : supplies.filter(item => item.type === tab.value).length;
+                const active = selectedTypeFilter === tab.value;
+                return (
+                  <TouchableOpacity
+                    key={tab.value}
+                    onPress={() => setSelectedTypeFilter(tab.value)}
+                    style={[styles.filterChip, active && styles.filterChipActive]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                      {tab.label} ({count})
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ResourceDirectoryHeader>
+        }
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
@@ -288,59 +386,101 @@ export default function ReliefSuppliesScreen() {
           />
         }
         ListEmptyComponent={
-          !loading ? (
+          loading ? (
+            <ActivityIndicator style={{ marginTop: 30 }} color={Colors.accent.primary} />
+          ) : (
             <EmptyState
               iconName="cube-outline"
-              title="No Relief Supplies Found"
+              title="No relief supplies yet"
               message={
                 selectedTypeFilter !== 'all'
                   ? `No supplies found for "${selectedTypeFilter}".`
-                  : 'Add relief supply inventory items to commence distribution.'
+                  : canManage
+                    ? 'Add stock to start recording relief distributions.'
+                    : 'Available relief supplies will appear here.'
               }
-              actionTitle="Register Stock"
-              onAction={() => setShowAddSupply(true)}
+              actionTitle={canManage ? 'Add stock' : undefined}
+              onAction={canManage ? () => setShowAddSupply(true) : undefined}
             />
-          ) : null
+          )
         }
         renderItem={({ item }) => {
-          const percentRemaining = item.totalQuantity > 0
-            ? Math.round((item.remainingQuantity / item.totalQuantity) * 100)
-            : 0;
+          const percentRemaining =
+            item.totalQuantity > 0
+              ? Math.round((item.remainingQuantity / item.totalQuantity) * 100)
+              : 0;
+          const stockColor =
+            item.remainingQuantity <= 0 ? '#B43545' : percentRemaining < 20 ? '#C47A08' : '#08A86B';
+          const typeTheme = SUPPLY_THEME[item.type];
 
           return (
             <Card style={styles.supplyCard}>
               <View style={styles.cardHeader}>
+                <View style={styles.resourceIcon}>
+                  <Ionicons name={typeTheme.icon} size={23} color={Colors.accent.primary} />
+                </View>
                 <View style={styles.headerLeft}>
                   <Text style={styles.itemName}>{item.itemName}</Text>
-                  <View style={styles.badgeRow}>
-                    <SupplyTypeBadge type={item.type} size="sm" />
-                    <OrganisationBadge type={item.organisationType} size="sm" />
-                  </View>
+                  <Text style={styles.cardCaption}>{item.district}</Text>
                 </View>
+              </View>
+              <View style={styles.badgeRow}>
                 <View style={styles.stockBadge}>
                   <Text style={styles.remainingVal}>{item.remainingQuantity.toLocaleString()}</Text>
-                  <Text style={styles.unitVal}>{item.unit.toUpperCase()}</Text>
+                  <Text style={styles.unitVal}>{item.unit}</Text>
+                </View>
+                <View style={[styles.typePill, { backgroundColor: typeTheme.background }]}>
+                  <Ionicons name={typeTheme.icon} size={13} color={typeTheme.color} />
+                  <Text style={[styles.typeText, { color: typeTheme.color }]}>
+                    {typeTheme.label}
+                  </Text>
+                </View>
+                <View style={styles.organisationPill}>
+                  <Text style={styles.organisationText}>
+                    {ORGANISATION_TYPES.find(type => type.value === item.organisationType)?.label ||
+                      item.organisationType}
+                  </Text>
                 </View>
               </View>
 
               {/* Stock Bar */}
               <View style={styles.progressBox}>
                 <View style={styles.progressHeader}>
-                  <Text style={styles.progressLabel}>Depot Stock Level</Text>
-                  <Text style={styles.progressPercent}>{percentRemaining}% Available</Text>
+                  <Text style={styles.progressLabel}>Available stock</Text>
+                  <Text style={[styles.progressPercent, { color: stockColor }]}>
+                    {item.availability === 'withdrawn'
+                      ? 'Withdrawn by owner'
+                      : item.remainingQuantity <= 0
+                        ? 'Out of stock'
+                        : percentRemaining < 20
+                          ? 'Low stock'
+                          : `${percentRemaining}% remaining`}
+                  </Text>
                 </View>
-                <ProgressBar
-                  current={item.remainingQuantity}
-                  total={item.totalQuantity}
-                  unit={item.unit}
-                  color={
-                    percentRemaining < 20
-                      ? Colors.status.danger
-                      : percentRemaining < 50
-                      ? Colors.status.warning
-                      : Colors.status.success
-                  }
-                />
+                <Text style={styles.stockCaption}>
+                  {item.remainingQuantity.toLocaleString()} of {item.totalQuantity.toLocaleString()}{' '}
+                  {item.unit}
+                </Text>
+                <View
+                  style={styles.progressTrack}
+                  accessibilityRole="progressbar"
+                  accessibilityLabel="Stock remaining"
+                  accessibilityValue={{
+                    min: 0,
+                    max: Math.max(1, item.totalQuantity),
+                    now: item.remainingQuantity,
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.progressFill,
+                      {
+                        width: `${Math.min(100, Math.max(0, percentRemaining))}%`,
+                        backgroundColor: stockColor,
+                      },
+                    ]}
+                  />
+                </View>
               </View>
 
               {/* Meta */}
@@ -348,43 +488,63 @@ export default function ReliefSuppliesScreen() {
                 <View style={styles.metaRow}>
                   <Ionicons name="business-outline" size={13} color={Colors.text.tertiary} />
                   <Text style={styles.metaItem}>
-                    Managing Agency: <Text style={styles.metaVal}>{item.organisationName}</Text>
+                    Organisation: <Text style={styles.metaVal}>{item.organisationName}</Text>
                   </Text>
                 </View>
                 <View style={styles.metaRow}>
                   <Ionicons name="location-sharp" size={13} color={Colors.accent.primary} />
                   <Text style={styles.metaItem}>
-                    Regional Depot: <Text style={styles.metaVal}>{item.district} District</Text>
+                    District: <Text style={styles.metaVal}>{item.district}</Text>
                   </Text>
                 </View>
               </View>
 
               {/* Action */}
-              <View style={styles.cardActions}>
-                <Button
-                  title={item.remainingQuantity > 0 ? 'Distribute Relief to Field' : 'Depot Depleted'}
-                  variant={item.remainingQuantity > 0 ? 'primary' : 'outline'}
-                  disabled={item.remainingQuantity <= 0}
-                  size="sm"
-                  icon={
-                    <Ionicons
-                      name={item.remainingQuantity > 0 ? 'paper-plane' : 'alert-circle'}
-                      size={15}
-                      color={item.remainingQuantity > 0 ? '#FFFFFF' : Colors.danger}
-                    />
-                  }
-                  onPress={() => {
-                    setShowDistribute(item);
-                    setDistForm({
-                      quantity: '',
-                      destinationDistrict: item.district,
-                      destinationLocation: '',
-                      details: '',
-                    });
-                  }}
-                  style={styles.actionBtn}
-                />
-              </View>
+              {canManage && (
+                <View style={styles.cardActions}>
+                  <Button
+                    title={
+                      item.availability === 'withdrawn'
+                        ? 'Stock withdrawn'
+                        : item.remainingQuantity > 0
+                          ? 'Record distribution'
+                          : 'Out of stock'
+                    }
+                    variant={item.remainingQuantity > 0 ? 'primary' : 'outline'}
+                    disabled={
+                      submitting || item.remainingQuantity <= 0 || item.availability === 'withdrawn'
+                    }
+                    size="sm"
+                    icon={
+                      <Ionicons
+                        name={item.remainingQuantity > 0 ? 'paper-plane' : 'alert-circle'}
+                        size={15}
+                        color={item.remainingQuantity > 0 ? '#FFFFFF' : Colors.danger}
+                      />
+                    }
+                    onPress={() => {
+                      setShowDistribute(item);
+                      setDistForm({
+                        quantity: '',
+                        destinationDistrict: item.district,
+                        destinationLocation: '',
+                        details: '',
+                      });
+                    }}
+                    style={styles.actionBtn}
+                  />
+                  <Button
+                    title={
+                      item.availability === 'withdrawn' ? 'Restore availability' : 'Withdraw stock'
+                    }
+                    variant="outline"
+                    size="sm"
+                    disabled={submitting}
+                    onPress={() => void handleAvailability(item)}
+                    style={styles.actionBtn}
+                  />
+                </View>
+              )}
             </Card>
           );
         }}
@@ -392,62 +552,73 @@ export default function ReliefSuppliesScreen() {
 
       {/* Add Supply Modal */}
       <FormModal
-        visible={showAddSupply}
-        title="Register Relief Supply Stock"
+        visible={canManage && showAddSupply}
+        title="Add relief stock"
+        feedbackKey={stockFeedback.attempt}
         onClose={() => setShowAddSupply(false)}
       >
+        <FormError message={stockFeedback.error} />
         <Input
-          label="Item Specification *"
+          label="Item name *"
+          error={stockFeedback.errors.itemName}
           placeholder="e.g. WFP Dry Rations 7-Day Pack"
           value={form.itemName}
-          onChangeText={(v) => setForm({ ...form, itemName: v })}
+          onChangeText={v => setForm({ ...form, itemName: v })}
           icon={<Ionicons name="cube-outline" size={18} color={Colors.accent.primary} />}
         />
         <Select
-          label="Commodity Category *"
+          label="Category *"
+          error={stockFeedback.errors.type}
           placeholder="Select category"
           value={form.type}
           options={SUPPLY_TYPES}
-          onValueChange={(v) => setForm({ ...form, type: v as SupplyType })}
+          onValueChange={v => setForm({ ...form, type: v as SupplyType })}
         />
         <Input
-          label="Initial Inflow Quantity *"
+          label="Quantity *"
+          error={stockFeedback.errors.totalQuantity}
           placeholder="e.g. 5000"
           keyboardType="numeric"
           value={form.totalQuantity}
-          onChangeText={(v) => setForm({ ...form, totalQuantity: v })}
+          onChangeText={v => setForm({ ...form, totalQuantity: v })}
           icon={<Ionicons name="calculator-outline" size={18} color={Colors.accent.primary} />}
         />
         <Input
-          label="Quantity Metric / Unit *"
+          label="Unit *"
+          error={stockFeedback.errors.unit}
           placeholder="e.g. packs, liters, kits, boxes"
           value={form.unit}
-          onChangeText={(v) => setForm({ ...form, unit: v })}
+          onChangeText={v => setForm({ ...form, unit: v })}
           icon={<Ionicons name="pricetag-outline" size={18} color={Colors.accent.primary} />}
         />
         <Select
-          label="Donating / Providing Agency Type *"
+          label="Organisation type *"
+          error={stockFeedback.errors.organisationType}
           placeholder="Select authority type"
           value={form.organisationType}
           options={ORGANISATION_TYPES}
-          onValueChange={(v) => setForm({ ...form, organisationType: v as OrganisationType })}
+          onValueChange={v => setForm({ ...form, organisationType: v as OrganisationType })}
         />
         <Input
-          label="Agency / Donor Name *"
+          label="Organisation name *"
+          error={stockFeedback.errors.organisationName}
           placeholder="e.g. World Food Programme (WFP)"
           value={form.organisationName}
-          onChangeText={(v) => setForm({ ...form, organisationName: v })}
+          onChangeText={v => setForm({ ...form, organisationName: v })}
           icon={<Ionicons name="business-outline" size={18} color={Colors.accent.primary} />}
         />
         <Select
-          label="Storage Warehouse Depot District *"
+          label="Storage district *"
+          error={
+            stockFeedback.errors.district || officerDistrictError(form.district, scopeDistrict)
+          }
           placeholder="Select warehouse location"
           value={form.district}
-          options={SRI_LANKAN_DISTRICTS.map((d) => ({ label: d, value: d }))}
-          onValueChange={(v) => setForm({ ...form, district: v })}
+          options={SRI_LANKAN_DISTRICTS.map(d => ({ label: d, value: d }))}
+          onValueChange={v => setForm({ ...form, district: v })}
         />
         <Button
-          title="Stock Inbound Inventory"
+          title="Add stock"
           variant="primary"
           loading={submitting}
           onPress={handleAddSupply}
@@ -457,51 +628,56 @@ export default function ReliefSuppliesScreen() {
 
       {/* Distribute Modal */}
       <FormModal
-        visible={!!showDistribute}
-        title={`Distribute: ${showDistribute?.itemName}`}
+        visible={canManage && !!showDistribute}
+        title="Record distribution"
+        feedbackKey={distributionFeedback.attempt}
         onClose={() => setShowDistribute(null)}
       >
         <View style={styles.stockBalanceCard}>
-          <Text style={styles.stockBalanceLabel}>VERIFIED INVENTORY BALANCE</Text>
+          <Text style={styles.stockBalanceLabel}>{showDistribute?.itemName}</Text>
           <Text style={styles.stockBalanceVal}>
-            {showDistribute?.remainingQuantity.toLocaleString()} {showDistribute?.unit.toUpperCase()} AVAILABLE
+            {showDistribute?.remainingQuantity.toLocaleString()} {showDistribute?.unit} available
           </Text>
         </View>
 
+        <FormError message={distributionFeedback.error} />
         <Input
-          label={`Dispatched Quantity (${showDistribute?.unit}) *`}
+          label={`Quantity (${showDistribute?.unit}) *`}
+          error={distributionFeedback.errors.quantity}
           placeholder={`Maximum: ${showDistribute?.remainingQuantity}`}
           keyboardType="numeric"
           value={distForm.quantity}
-          onChangeText={(v) => setDistForm({ ...distForm, quantity: v })}
+          onChangeText={v => setDistForm({ ...distForm, quantity: v })}
           icon={<Ionicons name="calculator-outline" size={18} color={Colors.accent.primary} />}
         />
 
         <Select
-          label="Target Delivery District *"
+          label="Destination district *"
+          error={distributionFeedback.errors.destinationDistrict}
           value={distForm.destinationDistrict}
-          options={SRI_LANKAN_DISTRICTS.map((d) => ({ label: d, value: d }))}
-          onValueChange={(v) => setDistForm({ ...distForm, destinationDistrict: v })}
+          options={SRI_LANKAN_DISTRICTS.map(d => ({ label: d, value: d }))}
+          onValueChange={v => setDistForm({ ...distForm, destinationDistrict: v })}
         />
 
         <Input
-          label="Target Safe Haven Shelter / Relief Post *"
+          label="Delivery location *"
+          error={distributionFeedback.errors.destinationLocation}
           placeholder="e.g. Bodhiraja Vidyalaya Safe Haven, Camp A"
           value={distForm.destinationLocation}
-          onChangeText={(v) => setDistForm({ ...distForm, destinationLocation: v })}
+          onChangeText={v => setDistForm({ ...distForm, destinationLocation: v })}
           icon={<Ionicons name="location-outline" size={18} color={Colors.accent.primary} />}
         />
 
         <Input
-          label="Convoy Log / Transit Waybill Notes"
+          label="Notes (optional)"
           placeholder="e.g. Dispatched via SL Army Convoy Truck 4B"
           value={distForm.details}
-          onChangeText={(v) => setDistForm({ ...distForm, details: v })}
+          onChangeText={v => setDistForm({ ...distForm, details: v })}
           icon={<Ionicons name="clipboard-outline" size={18} color={Colors.accent.primary} />}
         />
 
         <Button
-          title="Authorize Distribution Convoy"
+          title="Record distribution"
           variant="primary"
           loading={submitting}
           onPress={handleDistribute}
@@ -512,30 +688,30 @@ export default function ReliefSuppliesScreen() {
       {/* Distribution History Modal */}
       <FormModal
         visible={showHistory}
-        title="Field Distribution Ledger"
+        title="Distribution history"
         onClose={() => setShowHistory(false)}
       >
         {distributions.length === 0 ? (
           <EmptyState
             iconName="receipt-outline"
-            title="No Field Dispatches Logged"
-            message="Relief supplies distributed will generate immutable audit entries."
+            title="No distributions yet"
+            message="Recorded deliveries will appear here with their quantities and destinations."
           />
         ) : (
           <View style={styles.historyList}>
-            {distributions.map((d) => (
+            {distributions.map(d => (
               <Card key={d.id} style={styles.historyCard}>
                 <View style={styles.historyHeader}>
-                  <Text style={styles.historyLoc}>{d.destinationLocation}</Text>
+                  <Text style={styles.historyLoc}>{d.supplyName}</Text>
                   <Text style={styles.historyQty}>
-                    {d.quantity.toLocaleString()} UNITS
+                    {d.quantity.toLocaleString()} {d.unit}
                   </Text>
                 </View>
-                <Text style={styles.historyDistrict}>Sector: {d.destinationDistrict} District</Text>
-                {d.details && <Text style={styles.historyDetails}>{d.details}</Text>}
-                <Text style={styles.historyDate}>
-                  Dispatched: {new Date(d.distributedAt).toLocaleString()}
+                <Text style={styles.historyDistrict}>
+                  {d.destinationLocation} • {d.destinationDistrict}
                 </Text>
+                {!!d.details && <Text style={styles.historyDetails}>{d.details}</Text>}
+                <Text style={styles.historyDate}>{new Date(d.distributedAt).toLocaleString()}</Text>
               </Card>
             ))}
           </View>
@@ -549,91 +725,60 @@ export default function ReliefSuppliesScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.md,
-    gap: Spacing.md,
-  },
-  backButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#0F172A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  headerTitleGroup: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: FontSize.xl,
-    fontWeight: '900',
-    color: Colors.text.primary,
-  },
-  headerSubtitle: {
-    fontSize: FontSize.xs,
-    color: Colors.text.tertiary,
-    marginTop: 1,
-  },
-  historyBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#0F172A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  filterSection: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing.md,
-  },
+  filterRow: { flexDirection: 'row', gap: 8 },
+  filterSelect: { flex: 1, marginBottom: 10 },
+  tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   filterChip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs + 2,
-    borderRadius: BorderRadius.full,
-    backgroundColor: '#0F172A',
-    marginRight: Spacing.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 12,
+    minHeight: 44,
+    maxWidth: '100%',
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 11,
+    backgroundColor: '#F6F9FD',
   },
-  filterChipActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-    borderColor: Colors.accent.primary,
-  },
+  filterChipActive: { backgroundColor: '#EAF2FF' },
   filterChipText: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     color: Colors.text.secondary,
     fontWeight: '600',
+    flexShrink: 1,
+    textAlign: 'center',
   },
-  filterChipTextActive: {
-    color: Colors.accent.primary,
-    fontWeight: '700',
-  },
+  filterChipTextActive: { color: Colors.accent.primary },
   listContent: {
-    paddingHorizontal: Spacing.xl,
     paddingBottom: 110,
-    gap: Spacing.md,
   },
   supplyCard: {
-    marginBottom: Spacing.xs,
+    marginHorizontal: 18,
+    marginBottom: 13,
+    padding: 16,
+    borderColor: '#E7EEF8',
+    shadowOpacity: 0,
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: Spacing.sm,
+    marginBottom: 12,
+    gap: 10,
   },
   headerLeft: {
     flex: 1,
   },
+  resourceIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: '#EAF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardCaption: { ...MobileTypography.caption, color: Colors.text.secondary },
   itemName: {
-    fontSize: FontSize.md + 1,
+    ...MobileTypography.body,
+
     fontWeight: '800',
     color: Colors.text.primary,
     marginBottom: 4,
@@ -642,27 +787,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.xs,
+    flexWrap: 'wrap',
+    marginBottom: 16,
   },
+  typePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
+  },
+  typeText: { ...MobileTypography.caption, fontWeight: '700' },
+  organisationPill: {
+    backgroundColor: '#F1F5FA',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  organisationText: { ...MobileTypography.badge, fontWeight: '600', color: Colors.text.secondary },
   stockBadge: {
     alignItems: 'flex-end',
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: '#EAF2FF',
     paddingHorizontal: Spacing.md,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.sm,
+    paddingVertical: 8,
+    borderRadius: 12,
   },
   remainingVal: {
-    fontSize: FontSize.lg,
+    ...MobileTypography.body,
     fontWeight: '900',
     color: Colors.accent.primary,
   },
   unitVal: {
-    fontSize: 9,
-    fontWeight: '800',
+    ...MobileTypography.badge,
+    fontWeight: '500',
     color: Colors.text.tertiary,
   },
   progressBox: {
-    marginBottom: Spacing.md,
+    marginBottom: 16,
   },
+  stockCaption: { ...MobileTypography.caption, color: Colors.text.secondary, marginBottom: 8 },
+  progressTrack: { height: 7, borderRadius: 4, backgroundColor: '#E8EEF6', overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 4 },
   progressHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -670,29 +836,29 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   progressLabel: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     color: Colors.text.tertiary,
     fontWeight: '600',
   },
   progressPercent: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     fontWeight: '700',
     color: Colors.text.secondary,
   },
   metaBox: {
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    padding: Spacing.md,
+    backgroundColor: 'transparent',
+    padding: 0,
     borderRadius: BorderRadius.md,
-    gap: 5,
+    gap: 12,
     marginBottom: Spacing.md,
   },
   metaRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    alignItems: 'flex-start',
+    gap: 8,
   },
   metaItem: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     color: Colors.text.secondary,
     flex: 1,
   },
@@ -701,31 +867,34 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
   },
   cardActions: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     gap: Spacing.sm,
   },
   actionBtn: {
-    flex: 1,
+    minHeight: 50,
+    borderRadius: 14,
   },
   modalSubmit: {
     marginTop: Spacing.lg,
   },
   stockBalanceCard: {
-    backgroundColor: 'rgba(56, 189, 248, 0.1)',
+    backgroundColor: '#EAF2FF',
     padding: Spacing.md,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.25)',
+    borderColor: '#D6E5FF',
     marginBottom: Spacing.md,
     alignItems: 'center',
   },
   stockBalanceLabel: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: Colors.accent.primary,
+    ...MobileTypography.caption,
+    fontWeight: '600',
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: 6,
   },
   stockBalanceVal: {
-    fontSize: FontSize.lg,
+    ...MobileTypography.body,
     fontWeight: '900',
     color: Colors.text.primary,
     marginTop: 2,
@@ -735,39 +904,45 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   historyCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#DFE7F1',
     padding: Spacing.md,
   },
   historyHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 2,
+    alignItems: 'flex-start',
+    marginBottom: 8,
+    gap: 10,
   },
   historyLoc: {
-    fontSize: FontSize.sm,
+    ...MobileTypography.caption,
     fontWeight: '700',
     color: Colors.text.primary,
+    flex: 1,
   },
   historyQty: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     fontWeight: '800',
     color: Colors.accent.primary,
+    backgroundColor: '#EAF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    maxWidth: '40%',
   },
   historyDistrict: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     color: Colors.text.tertiary,
   },
   historyDetails: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     color: Colors.text.secondary,
     marginTop: 2,
-    fontStyle: 'italic',
   },
   historyDate: {
-    fontSize: FontSize.micro,
+    ...MobileTypography.caption,
     color: Colors.text.tertiary,
-    marginTop: 4,
+    marginTop: 10,
   },
 });

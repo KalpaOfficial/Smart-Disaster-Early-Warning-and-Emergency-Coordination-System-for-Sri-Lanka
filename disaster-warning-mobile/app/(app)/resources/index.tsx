@@ -1,31 +1,41 @@
+import { AppAlert } from '@/utils/appNotice';
+import { ReportScreenHero } from '@/components/ReportScreenHero';
 /**
  * Resource Coordination Overview — UC03 Combined Operational Picture.
  * Aggregates real-time telemetry across shelters, rescue units, and relief distribution.
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
-  Alert,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { ScreenContainer } from '@/components/ScreenContainer';
-import { Card } from '@/components/Card';
-import { MobileNavBar } from '@/components/MobileNavBar';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/colors';
+import {
+  ScreenContainer,
+  Card,
+  MobileNavBar,
+  ResourceColors as Colors,
+} from '@/components/ResourceComponents';
+import { FontSize, Spacing, BorderRadius, LightColors, MobileTypography } from '@/constants/colors';
 import { getActiveEvents } from '@/services/hazardEventService';
-import { getShelters } from '@/services/shelterService';
-import { getTeams } from '@/services/rescueTeamService';
-import { getSupplies } from '@/services/reliefSupplyService';
+import { getShelters, onSheltersChanged } from '@/services/shelterService';
+import { getTeams, onTeamsChanged } from '@/services/rescueTeamService';
+import { getSupplies, onSuppliesChanged } from '@/services/reliefSupplyService';
+import { resourceOverview } from '@/utils/resourceOverview';
 import type { HazardEvent, Shelter, RescueTeam, ReliefSupply } from '@/types/resources';
+import { useAuth } from '@/hooks/useAuth';
+import { DistrictDashboard } from '@/components/DistrictDashboard';
+import { ShelterDirectory } from '@/components/ShelterDirectory';
 
 export default function ResourceOverviewScreen() {
+  const {
+    state: { user },
+  } = useAuth();
+  if (user?.role === 'district_officer') return <DistrictDashboard />;
+  if (user?.role === 'citizen' || user?.role === 'volunteer') return <ShelterDirectory />;
+  return <CombinedResourceOverview />;
+}
+
+function CombinedResourceOverview() {
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [events, setEvents] = useState<HazardEvent[]>([]);
@@ -38,26 +48,32 @@ export default function ResourceOverviewScreen() {
     try {
       const evts = await getActiveEvents();
       setEvents(evts);
-      if (evts.length > 0 && !selectedEvent) {
-        setSelectedEvent(evts[0]);
-      }
+      setSelectedEvent(current => evts.find(event => event.id === current?.id) || evts[0] || null);
 
-      const [s, t, sup] = await Promise.all([
-        getShelters(),
-        getTeams(),
-        getSupplies(),
-      ]);
+      const [s, t, sup] = await Promise.all([getShelters(), getTeams(), getSupplies()]);
       setShelters(s);
       setTeams(t);
       setSupplies(sup);
     } catch (_error) {
-      Alert.alert('Connection Notice', 'Could not refresh live operational telemetry. Please check network.');
+      AppAlert.alert(
+        'Connection Notice',
+        'Could not refresh live operational telemetry. Please check network.'
+      );
     }
-  }, [selectedEvent]);
+  }, []);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const unsubscribe = [
+      onSheltersChanged(undefined, setShelters),
+      onTeamsChanged(undefined, setTeams),
+      onSuppliesChanged(undefined, setSupplies),
+    ];
+    return () => unsubscribe.forEach(stop => stop());
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -66,16 +82,17 @@ export default function ResourceOverviewScreen() {
   };
 
   // Computed metrics
-  const activeShelters = shelters.filter((s) => s.status === 'active' || s.status === 'over_capacity');
-  const totalCapacity = activeShelters.reduce((acc, s) => acc + s.capacity, 0);
-  const totalOccupancy = activeShelters.reduce((acc, s) => acc + s.currentOccupancy, 0);
-  const occupancyPercentage = totalCapacity > 0 ? Math.round((totalOccupancy / totalCapacity) * 100) : 0;
-
-  const deployedTeams = teams.filter((t) => ['dispatched', 'en_route', 'on_site'].includes(t.status));
-  const availableTeams = teams.filter((t) => t.status === 'available');
-
-  const totalSupplyItems = supplies.reduce((acc, s) => acc + s.totalQuantity, 0);
-  const remainingSupplyItems = supplies.reduce((acc, s) => acc + s.remainingQuantity, 0);
+  const {
+    activeShelters,
+    totalCapacity,
+    totalOccupancy,
+    occupancyPercentage,
+    deployedTeams,
+    availableTeams,
+    availableSupplyRecords,
+    supplyBalances,
+    invalidStockRecords,
+  } = resourceOverview({ shelters, teams, supplies }, selectedEvent);
 
   return (
     <ScreenContainer>
@@ -91,27 +108,20 @@ export default function ResourceOverviewScreen() {
         }
       >
         {/* Screen Header */}
-        <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton} activeOpacity={0.7}>
-            <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
-          </TouchableOpacity>
-          <View style={styles.headerTextGroup}>
-            <Text style={styles.headerTitle}>Combined Picture</Text>
-            <Text style={styles.headerSubtitle}>UC03 Unified Resource Coordination</Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => router.push('/(app)/resources/seed')}
-            style={styles.syncBtn}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="refresh" size={18} color={Colors.accent.primary} />
-          </TouchableOpacity>
+        <View style={{ marginHorizontal: -Spacing.xl, marginTop: -Spacing.sm, marginBottom: 20 }}>
+          <ReportScreenHero
+            title="Resource overview"
+            caption="DMC Officer"
+            icon="layers-outline"
+            description="Review shelters, rescue teams and relief stock for active events."
+            onBack={() => router.back()}
+          />
         </View>
 
         {/* Active Hazard Event Banner */}
         {selectedEvent ? (
           <LinearGradient
-            colors={['#1E2238', '#0F172A']}
+            colors={['#EAF2FF', '#FFFFFF']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.eventBanner}
@@ -120,42 +130,42 @@ export default function ResourceOverviewScreen() {
               <View style={styles.hazardBadge}>
                 <Ionicons name="warning" size={12} color="#F59E0B" />
                 <Text style={styles.hazardBadgeText}>
-                  {selectedEvent.hazardType.toUpperCase()} EMERGENCY
+                  {selectedEvent.hazardType.toUpperCase()} EVENT
                 </Text>
               </View>
-              <Text style={styles.eventStatusPill}>ACTIVE DISASTER</Text>
+              <Text style={styles.eventStatusPill}>Active event</Text>
             </View>
 
             <Text style={styles.eventTitle}>{selectedEvent.title}</Text>
             <View style={styles.sectorRow}>
               <Ionicons name="location-sharp" size={13} color={Colors.accent.primary} />
               <Text style={styles.eventDistricts}>
-                Sectors: {selectedEvent.affectedDistricts.join(' • ')}
+                Districts: {selectedEvent.affectedDistricts.join(' • ')}
               </Text>
             </View>
           </LinearGradient>
         ) : (
-          <Card
-            style={styles.noEventCard}
-            onPress={() => router.push('/(app)/resources/seed')}
-          >
+          <Card style={styles.noEventCard} onPress={() => router.push('/(app)/warnings/events')}>
             <Ionicons name="alert-circle-outline" size={32} color={Colors.warning} />
             <Text style={styles.noEventText}>No Active Hazard Event</Text>
-            <Text style={styles.noEventHint}>Tap to seed live Sri Lankan disaster telemetry</Text>
+            <Text style={styles.noEventHint}>
+              Create or activate a hazard event to coordinate resources.
+            </Text>
           </Card>
         )}
 
         {/* Event Selector Chips */}
         {events.length > 1 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.eventSelector}>
-            {events.map((evt) => (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.eventSelector}
+          >
+            {events.map(evt => (
               <TouchableOpacity
                 key={evt.id}
                 onPress={() => setSelectedEvent(evt)}
-                style={[
-                  styles.eventChip,
-                  evt.id === selectedEvent?.id && styles.eventChipActive,
-                ]}
+                style={[styles.eventChip, evt.id === selectedEvent?.id && styles.eventChipActive]}
                 activeOpacity={0.7}
               >
                 <Text
@@ -172,7 +182,7 @@ export default function ResourceOverviewScreen() {
         )}
 
         {/* Aggregated Ops Telemetry Cards */}
-        <Text style={styles.sectionTitle}>AGGREGATED CAPACITY TELEMETRY</Text>
+        <Text style={styles.sectionTitle}>Resource summary</Text>
 
         <View style={styles.telemetryCards}>
           {/* Shelters Telemetry */}
@@ -184,15 +194,31 @@ export default function ResourceOverviewScreen() {
               <View style={[styles.telemetryIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
                 <Ionicons name="home" size={20} color="#10B981" />
               </View>
-              <View style={[styles.percentBadge, { backgroundColor: occupancyPercentage > 90 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)' }]}>
-                <Text style={[styles.percentText, { color: occupancyPercentage > 90 ? '#EF4444' : '#10B981' }]}>
+              <View
+                style={[
+                  styles.percentBadge,
+                  {
+                    backgroundColor:
+                      occupancyPercentage > 90
+                        ? 'rgba(239, 68, 68, 0.2)'
+                        : 'rgba(16, 185, 129, 0.2)',
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.percentText,
+                    { color: occupancyPercentage > 90 ? '#EF4444' : '#10B981' },
+                  ]}
+                >
                   {occupancyPercentage}% Occupied
                 </Text>
               </View>
             </View>
             <Text style={styles.telemetryBigVal}>{activeShelters.length} Shelters</Text>
             <Text style={styles.telemetrySub}>
-              {totalOccupancy.toLocaleString()} evacuees in {totalCapacity.toLocaleString()} registered capacity
+              {totalOccupancy.toLocaleString()} evacuees in {totalCapacity.toLocaleString()}{' '}
+              registered capacity
             </Text>
           </Card>
 
@@ -213,7 +239,7 @@ export default function ResourceOverviewScreen() {
             </View>
             <Text style={styles.telemetryBigVal}>{deployedTeams.length} Deployed Units</Text>
             <Text style={styles.telemetrySub}>
-              Sri Lanka Army, Navy RABS, SLAF Helo & Red Cross DRT
+              Rescue teams currently assigned to active missions.
             </Text>
           </Card>
 
@@ -228,24 +254,35 @@ export default function ResourceOverviewScreen() {
               </View>
               <View style={styles.percentBadge}>
                 <Text style={[styles.percentText, { color: '#F59E0B' }]}>
-                  {totalSupplyItems > 0 ? Math.round((remainingSupplyItems / totalSupplyItems) * 100) : 0}% In Stock
+                  {availableSupplyRecords} Stock items
                 </Text>
               </View>
             </View>
-            <Text style={styles.telemetryBigVal}>{remainingSupplyItems.toLocaleString()} Units Remaining</Text>
-            <Text style={styles.telemetrySub}>
-              {(totalSupplyItems - remainingSupplyItems).toLocaleString()} units distributed across disaster zones
-            </Text>
+            <Text style={styles.telemetryBigVal}>Relief stock by unit</Text>
+            {supplyBalances.map(balance => (
+              <View key={balance.unit} style={{ paddingVertical: 8 }}>
+                <Text style={styles.telemetrySub}>
+                  {balance.remaining.toLocaleString()} / {balance.stocked.toLocaleString()}{' '}
+                  {balance.unit} available
+                </Text>
+                <Text style={styles.telemetrySub}>
+                  {balance.distributed.toLocaleString()} {balance.unit} distributed
+                </Text>
+              </View>
+            ))}
+            {!!invalidStockRecords && (
+              <Text style={styles.telemetrySub}>
+                {invalidStockRecords} invalid stock balance(s) excluded. Correct the inventory
+                records.
+              </Text>
+            )}
           </Card>
         </View>
 
         {/* Operational Modules Navigation */}
-        <Text style={styles.sectionTitle}>ASSET COORDINATION DOMAINS</Text>
+        <Text style={styles.sectionTitle}>Resource directories</Text>
 
-        <Card
-          style={styles.navCard}
-          onPress={() => router.push('/(app)/resources/shelters')}
-        >
+        <Card style={styles.navCard} onPress={() => router.push('/(app)/resources/shelters')}>
           <View style={styles.navRow}>
             <View style={[styles.navIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
               <Ionicons name="home-outline" size={22} color="#10B981" />
@@ -259,16 +296,15 @@ export default function ResourceOverviewScreen() {
                   </Text>
                 </View>
               </View>
-              <Text style={styles.navDesc}>Safe haven occupancy, facility telemetry & capacity management</Text>
+              <Text style={styles.navDesc}>
+                Safe haven occupancy, facility telemetry & capacity management
+              </Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={Colors.text.tertiary} />
           </View>
         </Card>
 
-        <Card
-          style={styles.navCard}
-          onPress={() => router.push('/(app)/resources/rescue-teams')}
-        >
+        <Card style={styles.navCard} onPress={() => router.push('/(app)/resources/rescue-teams')}>
           <View style={styles.navRow}>
             <View style={[styles.navIconBox, { backgroundColor: 'rgba(244, 63, 94, 0.15)' }]}>
               <Ionicons name="shield-outline" size={22} color="#F43F5E" />
@@ -282,7 +318,9 @@ export default function ResourceOverviewScreen() {
                   </Text>
                 </View>
               </View>
-              <Text style={styles.navDesc}>Tri-forces & NGO tactical fleet dispatch & deployment status</Text>
+              <Text style={styles.navDesc}>
+                Tri-forces & NGO tactical fleet dispatch & deployment status
+              </Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={Colors.text.tertiary} />
           </View>
@@ -305,7 +343,9 @@ export default function ResourceOverviewScreen() {
                   </Text>
                 </View>
               </View>
-              <Text style={styles.navDesc}>Inventory tracking, warehouse stocks & field distribution logs</Text>
+              <Text style={styles.navDesc}>
+                Inventory tracking, warehouse stocks & field distribution logs
+              </Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={Colors.text.tertiary} />
           </View>
@@ -334,7 +374,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#0F172A',
+    backgroundColor: LightColors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -357,7 +397,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#0F172A',
+    backgroundColor: LightColors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -388,7 +428,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   eventStatusPill: {
-    fontSize: 9,
+    ...MobileTypography.small,
     fontWeight: '800',
     color: Colors.danger,
     backgroundColor: 'rgba(239, 68, 68, 0.15)',
@@ -432,7 +472,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   eventChip: {
-    backgroundColor: '#0F172A',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full,
@@ -454,7 +494,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   sectionTitle: {
-    fontSize: FontSize.micro + 1,
+    ...MobileTypography.section,
     fontWeight: '800',
     color: Colors.text.tertiary,
     letterSpacing: 1.2,
@@ -498,7 +538,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   telemetrySub: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     color: Colors.text.tertiary,
   },
   navCard: {
@@ -519,9 +559,11 @@ const styles = StyleSheet.create({
   },
   navContent: {
     flex: 1,
+    minWidth: 0,
   },
   navTitleRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: Spacing.xs,
     marginBottom: 2,
@@ -537,12 +579,11 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
   },
   navBadgeText: {
-    fontSize: 9,
+    ...MobileTypography.small,
     fontWeight: '800',
   },
   navDesc: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     color: Colors.text.tertiary,
-    lineHeight: 16,
   },
 });

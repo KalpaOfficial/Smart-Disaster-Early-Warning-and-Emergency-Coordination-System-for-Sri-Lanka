@@ -1,12 +1,11 @@
-import {
-  uploadGroundReportPhoto,
-  deleteGroundReportPhoto,
-} from '@/services/photoUploadService';
+import { uploadGroundReportPhoto, deleteGroundReportPhoto } from '@/services/photoUploadService';
+import { uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 
 describe('UC02: Photo Upload Service', () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
     // Mock global fetch for local URI conversion to blob
     globalThis.fetch = jest.fn(async () => ({
       ok: true,
@@ -15,6 +14,8 @@ describe('UC02: Photo Upload Service', () => {
     })) as unknown as typeof fetch;
   });
 
+  afterEach(() => jest.restoreAllMocks());
+
   afterAll(() => {
     globalThis.fetch = originalFetch;
   });
@@ -22,18 +23,22 @@ describe('UC02: Photo Upload Service', () => {
   it('uploads a local photograph and returns photoUrl and storage photoPath', async () => {
     const result = await uploadGroundReportPhoto(
       'file:///data/user/0/cache/photo-abc.jpg',
-      'report-temp-123',
+      'report-temp-123'
     );
 
     expect(result).toBeDefined();
     expect(result.photoUrl).toBe('https://mockstorage.firebase/report.jpg');
     expect(result.photoPath).toContain('ground-reports/report-temp-123/evidence_');
     expect(result.photoPath).toMatch(/\.jpg$/);
+    expect(uploadBytes).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+      contentType: 'image/jpeg',
+      customMetadata: { identifier: 'report-temp-123', uploadedAt: expect.any(String) },
+    });
   });
 
   it('throws an error if no photograph URI is provided', async () => {
     await expect(uploadGroundReportPhoto('', 'report-123')).rejects.toThrow(
-      'No photograph URI was provided for upload.',
+      'No photograph URI was provided for upload.'
     );
   });
 
@@ -43,15 +48,44 @@ describe('UC02: Photo Upload Service', () => {
       status: 404,
     })) as unknown as typeof fetch;
 
-    await expect(
-      uploadGroundReportPhoto('file:///invalid/path.jpg', 'report-123'),
-    ).rejects.toThrow(/Failed to read photograph from local device storage/);
+    await expect(uploadGroundReportPhoto('file:///invalid/path.jpg', 'report-123')).rejects.toThrow(
+      /Failed to read photograph from local device storage/
+    );
   });
 
   it('safely attempts deletion of an uploaded photograph without crashing on missing path', async () => {
     await expect(deleteGroundReportPhoto('')).resolves.toBeUndefined();
     await expect(
-      deleteGroundReportPhoto('ground-reports/report_123/evidence_123.jpg'),
+      deleteGroundReportPhoto('ground-reports/report_123/evidence_123.jpg')
     ).resolves.toBeUndefined();
+    expect(deleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not delete browser-local evidence from Firebase Storage', async () => {
+    await deleteGroundReportPhoto('web-local/report/evidence.jpg');
+    expect(deleteObject).not.toHaveBeenCalled();
+  });
+
+  it.each(['upload', 'download'])(
+    'propagates native %s failures so a report is not submitted without evidence',
+    async stage => {
+      const operation = stage === 'upload' ? uploadBytes : getDownloadURL;
+      (operation as jest.Mock).mockRejectedValueOnce(new Error('Storage unavailable'));
+      await expect(uploadGroundReportPhoto('file:///photo.jpg', 'report')).rejects.toThrow(
+        'Storage unavailable'
+      );
+      if (stage === 'upload') expect(getDownloadURL).not.toHaveBeenCalled();
+    }
+  );
+
+  it('keeps cleanup failures nonfatal and records a warning', async () => {
+    (deleteObject as jest.Mock).mockRejectedValueOnce(new Error('Permission denied'));
+    await expect(
+      deleteGroundReportPhoto('ground-reports/report/photo.jpg')
+    ).resolves.toBeUndefined();
+    expect(console.warn).toHaveBeenCalledWith(
+      'Could not delete storage photograph:',
+      'Permission denied'
+    );
   });
 });

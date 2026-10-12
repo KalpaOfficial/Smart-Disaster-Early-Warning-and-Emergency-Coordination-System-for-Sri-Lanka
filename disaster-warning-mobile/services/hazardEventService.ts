@@ -13,11 +13,14 @@ import {
   updateDoc,
   arrayUnion,
   serverTimestamp,
+  onSnapshot,
+  runTransaction,
   type DocumentData,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { auth, db } from './firebase';
 import type { HazardEvent } from '@/types/resources';
+import { normalizeHazardEvent, type HazardEventDetails } from '@/utils/hazardEventForm';
 
 const COLLECTION = 'hazardEvents';
 
@@ -31,7 +34,10 @@ function mapEventDoc(docSnap: QueryDocumentSnapshot<DocumentData>): HazardEvent 
     status: d.status || 'active',
     affectedDistricts: d.affectedDistricts || [],
     affectedRiverBasins: d.affectedRiverBasins || [],
-    startDate: d.startDate?.toDate?.()?.toISOString() || new Date().toISOString(),
+    startDate:
+      typeof d.startDate === 'string'
+        ? d.startDate
+        : d.startDate?.toDate?.()?.toISOString() || new Date().toISOString(),
     description: d.description || '',
   };
 }
@@ -40,10 +46,7 @@ function mapEventDoc(docSnap: QueryDocumentSnapshot<DocumentData>): HazardEvent 
  * Get all active hazard events from Cloud Firestore.
  */
 export async function getActiveEvents(): Promise<HazardEvent[]> {
-  const q = query(
-    collection(db, COLLECTION),
-    where('status', '==', 'active'),
-  );
+  const q = query(collection(db, COLLECTION), where('status', '==', 'active'));
 
   const snapshot = await getDocs(q);
   const items = snapshot.docs.map(mapEventDoc);
@@ -66,16 +69,7 @@ export async function getAllEvents(): Promise<HazardEvent[]> {
 export async function getHazardEvent(id: string): Promise<HazardEvent | null> {
   const snap = await getDoc(doc(db, COLLECTION, id));
   if (snap.exists()) {
-    const d = snap.data();
-    return {
-      id: snap.id,
-      title: d.title || '',
-      hazardType: d.hazardType || 'flood',
-      status: d.status || 'active',
-      affectedDistricts: d.affectedDistricts || [],
-      startDate: d.startDate?.toDate?.()?.toISOString() || new Date().toISOString(),
-      description: d.description || '',
-    };
+    return mapEventDoc(snap as QueryDocumentSnapshot<DocumentData>);
   }
   return null;
 }
@@ -84,14 +78,91 @@ export async function getHazardEvent(id: string): Promise<HazardEvent | null> {
  * Create a new hazard event in Cloud Firestore.
  */
 export async function createHazardEvent(
-  data: Omit<HazardEvent, 'id' | 'startDate'>,
+  data: Omit<HazardEvent, 'id' | 'startDate'>
 ): Promise<string> {
+  const details = normalizeHazardEvent(data);
+  if (data.status !== 'active') throw new Error('New hazard events must start as active.');
+  const uid = await requireDmcOfficer();
   const docRef = await addDoc(collection(db, COLLECTION), {
-    ...data,
+    ...details,
+    status: 'active',
+    createdBy: uid,
     startDate: serverTimestamp(),
     createdAt: serverTimestamp(),
   });
   return docRef.id;
+}
+
+async function requireDmcOfficer(): Promise<string> {
+  const current = auth.currentUser;
+  if (!current) throw new Error('Sign in as a DMC officer to manage hazard events.');
+  const profile = await getDoc(doc(db, 'users', current.uid));
+  if (!profile.exists() || profile.data().role !== 'dmc_officer')
+    throw new Error('Only DMC officers can manage hazard events.');
+  return current.uid;
+}
+
+export function subscribeToHazardEvents(
+  onChange: (events: HazardEvent[]) => void,
+  onError?: (error: Error) => void
+): () => void {
+  return onSnapshot(
+    collection(db, COLLECTION),
+    snapshot => {
+      onChange(
+        snapshot.docs
+          .map(mapEventDoc)
+          .sort((a, b) => Date.parse(b.startDate) - Date.parse(a.startDate))
+      );
+    },
+    onError
+  );
+}
+
+export async function updateHazardEvent(id: string, input: HazardEventDetails): Promise<void> {
+  if (!id?.trim()) throw new Error('Select a hazard event.');
+  const details = normalizeHazardEvent(input);
+  const uid = await requireDmcOfficer();
+  await runTransaction(db, async transaction => {
+    const ref = doc(db, COLLECTION, id);
+    const event = await transaction.get(ref);
+    if (!event.exists()) throw new Error('This hazard event no longer exists.');
+    transaction.update(ref, { ...details, updatedBy: uid, updatedAt: serverTimestamp() });
+  });
+}
+
+export async function setHazardEventStatus(
+  id: string,
+  status: HazardEvent['status']
+): Promise<void> {
+  if (!id?.trim()) throw new Error('Select a hazard event.');
+  if (status !== 'active' && status !== 'closed') throw new Error('Choose Active or Closed.');
+  const uid = await requireDmcOfficer();
+  await runTransaction(db, async transaction => {
+    const ref = doc(db, COLLECTION, id);
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists()) throw new Error('This hazard event no longer exists.');
+    const previous = snapshot.data().status;
+    if (previous === status)
+      throw new Error(
+        `This event is already ${status === 'active' ? 'active' : 'closed'}. Refresh the list.`
+      );
+    transaction.update(ref, {
+      status,
+      updatedBy: uid,
+      updatedAt: serverTimestamp(),
+      closedAt: status === 'closed' ? serverTimestamp() : null,
+      closedBy: status === 'closed' ? uid : null,
+      timeline: arrayUnion({
+        id: `status-${Date.now()}-${uid}`,
+        eventId: id,
+        eventType: status === 'closed' ? 'EVENT_CLOSED' : 'EVENT_REOPENED',
+        headline: status === 'closed' ? 'Hazard event closed' : 'Hazard event reopened',
+        issuedBy: uid,
+        timestamp: new Date().toISOString(),
+      }),
+    });
+  });
 }
 
 export interface EventTimelineEntry {
@@ -118,7 +189,7 @@ export async function attachWarningToTimeline(
   warningId: string,
   headline: string,
   severity?: string,
-  issuedBy?: string,
+  issuedBy?: string
 ): Promise<void> {
   if (!hazardEventId) return;
   try {
@@ -172,9 +243,9 @@ export async function getEventTimeline(hazardEventId: string): Promise<EventTime
     // Fetch from subcollection
     const subcollRef = collection(db, `${COLLECTION}/${hazardEventId}/timeline`);
     const subSnap = await getDocs(subcollRef);
-    subSnap.docs.forEach((d) => {
+    subSnap.docs.forEach(d => {
       const itemData = d.data();
-      if (!entries.some((e) => e.id === d.id || e.warningId === itemData.warningId)) {
+      if (!entries.some(e => e.id === d.id || e.warningId === itemData.warningId)) {
         entries.push({
           id: d.id,
           eventId: itemData.eventId || hazardEventId,
@@ -190,7 +261,9 @@ export async function getEventTimeline(hazardEventId: string): Promise<EventTime
       }
     });
 
-    return entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return entries.sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
   } catch (error) {
     console.warn('Notice fetching event timeline:', error);
     return [];
@@ -210,7 +283,7 @@ export async function attachReportToTimeline(
     district?: string;
     officerName?: string;
     headline?: string;
-  },
+  }
 ): Promise<void> {
   if (!hazardEventId) return;
   try {
@@ -225,7 +298,9 @@ export async function attachReportToTimeline(
         locationName: reportData.locationName || '',
         district: reportData.district || '',
         officerName: reportData.officerName || 'DMC Officer',
-        headline: reportData.headline || `Ground Report Verified: ${reportData.referenceNumber || reportId}`,
+        headline:
+          reportData.headline ||
+          `Ground Report Verified: ${reportData.referenceNumber || reportId}`,
         timestamp: new Date().toISOString(),
       }),
       updatedAt: serverTimestamp(),
@@ -234,4 +309,3 @@ export async function attachReportToTimeline(
     console.warn('Notice attaching ground report to event timeline:', error);
   }
 }
-

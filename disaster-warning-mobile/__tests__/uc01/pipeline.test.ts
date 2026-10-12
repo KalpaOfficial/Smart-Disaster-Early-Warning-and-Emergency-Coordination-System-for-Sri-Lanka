@@ -1,3 +1,16 @@
+import { auth } from '@/services/firebase';
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+beforeEach(() => {
+  Object.assign(auth, { currentUser: { uid: 'officer-uid' } });
+  installResourceFirestore({
+    'users/officer-uid': { role: 'dmc_officer' },
+    'hazardEvents/event-monsoon-2026': {
+      status: 'active',
+      hazardType: 'flood',
+      title: 'Fixture flood event',
+    },
+  });
+});
 /**
  * Unit Tests for End-to-End UC01 Warning Dispatch Pipeline (`executeWarningDispatchPipeline`).
  */
@@ -15,8 +28,20 @@ jest.mock('@/services/recipientService', () => {
       }
       return {
         recipients: [
-          { id: 'u-1', fullName: 'User 1', district: 'Ratnapura', role: 'citizen', email: 'u1@test.com' },
-          { id: 'u-2', fullName: 'User 2', district: 'Kalutara', role: 'citizen', email: 'u2@test.com' },
+          {
+            id: 'u-1',
+            fullName: 'User 1',
+            district: 'Ratnapura',
+            role: 'citizen',
+            email: 'u1@test.com',
+          },
+          {
+            id: 'u-2',
+            fullName: 'User 2',
+            district: 'Kalutara',
+            role: 'citizen',
+            email: 'u2@test.com',
+          },
         ],
         recipientCount: 50,
         contributingDistricts: ['Ratnapura', 'Kalutara'],
@@ -43,7 +68,7 @@ describe('UC01 Warning Dispatch Pipeline', () => {
   it('should validate form and reject if headline is empty', async () => {
     const invalidPayload = { ...validPayload, headline: '' };
     await expect(
-      executeWarningDispatchPipeline(invalidPayload, 'officer-uid', 'Officer Perera'),
+      executeWarningDispatchPipeline(invalidPayload, 'officer-uid', 'Officer Perera')
     ).rejects.toThrow('Warning headline is mandatory.');
   });
 
@@ -51,13 +76,13 @@ describe('UC01 Warning Dispatch Pipeline', () => {
     const result = await executeWarningDispatchPipeline(
       validPayload,
       'officer-uid',
-      'Officer Perera',
+      'Officer Perera'
     );
 
     expect(result.warningId).toBeDefined();
     expect(result.finalStatus).toBe('delivered');
     expect(result.channelResults.length).toBe(3);
-    expect(result.channelResults.every((r) => r.status === 'Success')).toBe(true);
+    expect(result.channelResults.every(r => r.status === 'Success')).toBe(true);
   });
 
   it('should calculate partially_failed status when one channel fails and others succeed', async () => {
@@ -67,15 +92,15 @@ describe('UC01 Warning Dispatch Pipeline', () => {
       'Officer Perera',
       {
         sms: { mockFailure: true }, // SMS channel fails
-      },
+      }
     );
 
     expect(result.warningId).toBeDefined();
     expect(result.finalStatus).toBe('partially_failed');
     expect(result.channelResults.length).toBe(3);
 
-    const smsRes = result.channelResults.find((r) => r.channel === 'sms');
-    const pushRes = result.channelResults.find((r) => r.channel === 'push');
+    const smsRes = result.channelResults.find(r => r.channel === 'sms');
+    const pushRes = result.channelResults.find(r => r.channel === 'push');
 
     expect(smsRes?.status).toBe('Failed');
     expect(pushRes?.status).toBe('Success');
@@ -90,11 +115,11 @@ describe('UC01 Warning Dispatch Pipeline', () => {
         push: { mockFailure: true },
         sms: { mockFailure: true },
         audible: { mockFailure: true },
-      },
+      }
     );
 
     expect(result.warningId).toBeDefined();
     expect(result.finalStatus).toBe('failed');
-    expect(result.channelResults.every((r) => r.status === 'Failed')).toBe(true);
+    expect(result.channelResults.every(r => r.status === 'Failed')).toBe(true);
   });
 });

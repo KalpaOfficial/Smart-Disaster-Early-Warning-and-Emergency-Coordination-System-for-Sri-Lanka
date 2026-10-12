@@ -1,9 +1,4 @@
-import {
-  ref,
-  uploadBytes,
-  getDownloadURL,
-  deleteObject,
-} from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { storage } from './firebase';
 
 export interface UploadPhotoResult {
@@ -17,16 +12,17 @@ const isWeb = typeof window !== 'undefined' && typeof document !== 'undefined';
  * Convert a Blob into a base64 Data URL (used as web fallback when Firebase Storage CORS is restricted).
  */
 function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     if (typeof FileReader === 'undefined') {
-      resolve('data:image/jpeg;base64,');
+      reject(new Error('Could not read the photograph. Please take or choose it again.'));
       return;
     }
     const reader = new FileReader();
     reader.onloadend = () => {
-      resolve(typeof reader.result === 'string' ? reader.result : '');
+      if (typeof reader.result === 'string' && reader.result.length > 30) resolve(reader.result);
+      else reject(new Error('The photograph could not be read.'));
     };
-    reader.onerror = () => resolve('');
+    reader.onerror = () => reject(new Error('The photograph could not be read.'));
     reader.readAsDataURL(blob);
   });
 }
@@ -35,67 +31,69 @@ function blobToDataUrl(blob: Blob): Promise<string> {
  * Resize and compress an image Blob or Data URL on Web using HTML5 Canvas.
  * Ensures the output string is ~30KB-60KB, far below Firestore's 1,048,487 byte document field limit.
  */
-function compressImageOnWeb(source: Blob | string, maxDimension = 800, quality = 0.6): Promise<string> {
-  return new Promise((resolve) => {
+function compressImageOnWeb(
+  source: Blob | string,
+  maxDimension = 800,
+  quality = 0.6
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const resolveOriginal = () => {
+      if (typeof source === 'string') resolve(source.length > 800000 ? '' : source);
+      else blobToDataUrl(source).then(res => resolve(res.length > 800000 ? '' : res), reject);
+    };
     if (typeof window === 'undefined' || typeof document === 'undefined') {
-      if (typeof source === 'string') {
-        resolve(source.length > 800000 ? '' : source);
-      } else {
-        blobToDataUrl(source).then((res) => resolve(res.length > 800000 ? '' : res));
-      }
+      resolveOriginal();
       return;
     }
 
+    let objectUrl: string | null = null;
+    const releaseObjectUrl = () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = null;
+    };
     try {
       const img = new window.Image();
-      const objectUrl = typeof source === 'string' ? null : URL.createObjectURL(source);
+      objectUrl = typeof source === 'string' ? null : URL.createObjectURL(source);
       const srcUrl = typeof source === 'string' ? source : objectUrl!;
 
       img.onload = () => {
-        if (objectUrl) URL.revokeObjectURL(objectUrl);
-        let { width, height } = img;
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = Math.round((height * maxDimension) / width);
-            width = maxDimension;
-          } else {
-            width = Math.round((width * maxDimension) / height);
-            height = maxDimension;
+        releaseObjectUrl();
+        try {
+          let { width, height } = img;
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
           }
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(width, 1);
-        canvas.height = Math.max(height, 1);
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          if (typeof source === 'string') {
-            resolve(source.length > 800000 ? '' : source);
-          } else {
-            blobToDataUrl(source).then(resolve);
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(width, 1);
+          canvas.height = Math.max(height, 1);
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolveOriginal();
+            return;
           }
-          return;
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressedDataUrl.length > 800000 ? '' : compressedDataUrl);
+        } catch {
+          reject(new Error('Could not process the photograph. Please take or choose it again.'));
         }
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-        resolve(compressedDataUrl);
       };
 
       img.onerror = () => {
-        if (objectUrl) URL.revokeObjectURL(objectUrl);
-        if (typeof source === 'string') {
-          resolve(source.length > 800000 ? '' : source);
-        } else {
-          blobToDataUrl(source).then(resolve);
-        }
+        releaseObjectUrl();
+        reject(new Error('Could not read the photograph. Please take or choose it again.'));
       };
 
       img.src = srcUrl;
     } catch {
-      if (typeof source === 'string') {
-        resolve(source.length > 800000 ? '' : source);
-      } else {
-        blobToDataUrl(source).then(resolve);
-      }
+      releaseObjectUrl();
+      resolveOriginal();
     }
   });
 }
@@ -110,7 +108,7 @@ function compressImageOnWeb(source: Blob | string, maxDimension = 800, quality =
  */
 export async function uploadGroundReportPhoto(
   localUri: string,
-  identifier: string,
+  identifier: string
 ): Promise<UploadPhotoResult> {
   if (!localUri) {
     throw new Error('No photograph URI was provided for upload.');
@@ -126,8 +124,10 @@ export async function uploadGroundReportPhoto(
     // Fast-path: if localUri is already a Data URL, compress it to fit Firestore
     if (isWeb && localUri.startsWith('data:')) {
       const compressed = await compressImageOnWeb(localUri);
+      if (!compressed)
+        throw new Error('The photograph is too large. Please choose a smaller image.');
       return {
-        photoUrl: compressed || localUri,
+        photoUrl: compressed,
         photoPath: `web-local/${cleanId}/evidence_${timestamp}.jpg`,
       };
     }
@@ -141,19 +141,10 @@ export async function uploadGroundReportPhoto(
       }
       blob = await response.blob();
     } catch (readErr) {
-      // In web browsers, previous session blob: URLs expire after a page reload.
-      // Supply a fallback image blob so offline queue synchronization is not stalled indefinitely.
-      if (isWeb && localUri.startsWith('blob:')) {
-        console.warn('Local browser blob URL has expired. Using emergency fallback blob for report sync.');
-        blob = new Blob(
-          [new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46])],
-          { type: 'image/jpeg' },
-        );
-      } else {
-        throw new Error(
-          `Failed to read photograph from local device storage: ${(readErr as Error)?.message || 'file missing'}`,
-        );
-      }
+      throw new Error(
+        'Failed to read photograph from local device storage: ' +
+          ((readErr as Error)?.message || 'file missing')
+      );
     }
 
     // On web browser environment, Firebase Cloud Storage enforces CORS preflight headers
@@ -161,8 +152,9 @@ export async function uploadGroundReportPhoto(
     // Resize and compress image to a compact Base64 data URL (<60KB) to safely fit Firestore limits.
     if (isWeb) {
       const dataUrl = await compressImageOnWeb(blob);
+      if (!dataUrl) throw new Error('The photograph could not be read.');
       return {
-        photoUrl: dataUrl || localUri,
+        photoUrl: dataUrl,
         photoPath: `web-local/${cleanId}/evidence_${timestamp}.jpg`,
       };
     }

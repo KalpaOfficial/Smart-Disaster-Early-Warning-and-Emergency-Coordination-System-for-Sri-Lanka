@@ -9,24 +9,23 @@
  * - Primary action button to return to the target hazard event.
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
 import { ScreenContainer } from '@/components/ScreenContainer';
-import { Card } from '@/components/Card';
-import { Button } from '@/components/Button';
+import {
+  OfficerCard as Card,
+  OfficerButton as Button,
+  OfficerHero,
+  officerScreenStyle,
+  officerShellStyle,
+} from '@/components/OfficerUi';
 import { EmptyState } from '@/components/EmptyState';
 import { MobileNavBar } from '@/components/MobileNavBar';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/colors';
+import { Spacing, BorderRadius } from '@/constants/colors';
+import { OfficerColors as Colors, OfficerFontSize as FontSize } from '@/components/OfficerUi';
 import { getWarningById, getDeliveryLogsForWarning } from '@/services/warningService';
 import type { HazardWarning, DeliveryLog, DeliveryChannel, WarningStatus } from '@/types/warning';
 
@@ -116,43 +115,43 @@ export default function WarningDeliverySummaryScreen() {
     switch (status) {
       case 'delivered':
         return {
-          bannerTitle: 'WARNING DISPATCHED',
+          bannerTitle: 'Warning sent',
           statusText: 'Dispatched',
           color: Colors.success,
           bgColor: 'rgba(16, 185, 129, 0.12)',
           borderColor: 'rgba(16, 185, 129, 0.35)',
           icon: 'checkmark-circle' as keyof typeof Ionicons.glyphMap,
-          gradientColors: ['#064E3B', '#0F172A'] as const,
+          gradientColors: ['#E5F7ED', '#F8FAFD'] as const,
         };
       case 'partially_failed':
         return {
-          bannerTitle: 'DISPATCHED WITH PARTIAL DELIVERY',
+          bannerTitle: 'Some deliveries failed',
           statusText: 'Dispatched (Partial)',
           color: Colors.warning,
           bgColor: 'rgba(245, 158, 11, 0.12)',
           borderColor: 'rgba(245, 158, 11, 0.35)',
           icon: 'warning' as keyof typeof Ionicons.glyphMap,
-          gradientColors: ['#78350F', '#0F172A'] as const,
+          gradientColors: ['#FFF2D4', '#F8FAFD'] as const,
         };
       case 'failed':
         return {
-          bannerTitle: 'DISPATCH FAILED',
+          bannerTitle: 'Warning delivery failed',
           statusText: 'Dispatch Failed',
           color: Colors.danger,
           bgColor: 'rgba(239, 68, 68, 0.12)',
           borderColor: 'rgba(239, 68, 68, 0.35)',
           icon: 'close-circle' as keyof typeof Ionicons.glyphMap,
-          gradientColors: ['#7F1D1D', '#0F172A'] as const,
+          gradientColors: ['#FFF1F2', '#F8FAFD'] as const,
         };
       default:
         return {
-          bannerTitle: 'WARNING DISPATCH SUMMARY',
+          bannerTitle: 'Warning delivery status',
           statusText: status || 'Processing',
           color: Colors.accent.primary,
           bgColor: 'rgba(99, 102, 241, 0.12)',
           borderColor: 'rgba(99, 102, 241, 0.35)',
           icon: 'information-circle' as keyof typeof Ionicons.glyphMap,
-          gradientColors: ['#1E1B4B', '#0F172A'] as const,
+          gradientColors: ['#EAF2FF', '#F8FAFD'] as const,
         };
     }
   };
@@ -161,11 +160,11 @@ export default function WarningDeliverySummaryScreen() {
   const formatSeverity = (sev: string) => {
     switch (sev.toLowerCase()) {
       case 'evacuation':
-        return 'High (Evacuation Order)';
+        return 'Evacuation order';
       case 'warning':
-        return 'High';
+        return 'Warning';
       case 'advisory':
-        return 'Medium';
+        return 'Advisory';
       default:
         return sev;
     }
@@ -180,7 +179,7 @@ export default function WarningDeliverySummaryScreen() {
     errorMessage?: string;
   }[] => {
     if (deliveryLogs.length > 0) {
-      return deliveryLogs.map((log) => ({
+      return deliveryLogs.map(log => ({
         channel: log.channel,
         deliveredCount: log.deliveredCount,
         failedCount: log.failedCount,
@@ -190,7 +189,7 @@ export default function WarningDeliverySummaryScreen() {
     }
 
     if (warning?.channelResults && warning.channelResults.length > 0) {
-      return warning.channelResults.map((chRes) => {
+      return warning.channelResults.map(chRes => {
         const isSuccess = chRes.status === 'success' || chRes.status === 'Success';
         const isFailed = chRes.status === 'failed' || chRes.status === 'Failed';
         return {
@@ -204,7 +203,7 @@ export default function WarningDeliverySummaryScreen() {
     }
 
     if (warning?.channels) {
-      return warning.channels.map((ch) => ({
+      return warning.channels.map(ch => ({
         channel: ch,
         deliveredCount: warning.status === 'delivered' ? warning.recipientCount : 0,
         failedCount: warning.status === 'failed' ? warning.recipientCount : 0,
@@ -219,44 +218,29 @@ export default function WarningDeliverySummaryScreen() {
   const logsToDisplay = effectiveChannelLogs();
 
   return (
-    <ScreenContainer>
+    <ScreenContainer style={officerScreenStyle} contentStyle={officerShellStyle}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* Duty Desk Command Header Banner */}
-        <View style={styles.dutyDeskHeader}>
-          <View style={styles.dutyDeskTitleRow}>
-            <Text style={styles.dutyDeskLogoText}>DMC CORE</Text>
-            <View style={styles.dutyDeskDivider} />
-            <Text style={styles.dutyDeskSubText}>DISASTER MANAGEMENT CENTRE | DUTY DESK</Text>
-          </View>
-          <View style={styles.dutyDeskStatusPill}>
-            <View style={styles.statusDotGreen} />
-            <Text style={styles.dutyDeskStatusText}>STATUS: NOMINAL</Text>
-          </View>
-        </View>
-
         {/* Navigation Header */}
-        <View style={styles.navHeader}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-            <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
-          </TouchableOpacity>
-          <View style={styles.navTitleBox}>
-            <Text style={styles.navPill}>PANEL 04: BROADCAST VERIFICATION & DELIVERY SUMMARY</Text>
-            <Text style={styles.navTitle}>Delivery Summary</Text>
-          </View>
-        </View>
+        <OfficerHero
+          title="Delivery summary"
+          description="Check how your warning reached affected communities."
+          caption="DMC Officer"
+          icon="notifications-outline"
+          onBack={() => router.back()}
+        />
 
         {/* Loading State */}
         {loading ? (
           <Card style={styles.stateCard}>
             <ActivityIndicator size="large" color={Colors.accent.primary} />
             <Text style={styles.stateTitle}>Retrieving Delivery Logs...</Text>
-            <Text style={styles.stateDesc}>Fetching dispatch summary from Cloud Firestore.</Text>
+            <Text style={styles.stateDesc}>Checking warning delivery results.</Text>
           </Card>
         ) : error ? (
           /* Error State */
           <Card style={styles.errorCard}>
             <Ionicons name="cloud-offline" size={36} color={Colors.danger} />
-            <Text style={styles.errorTitle}>Firestore Fetch Error</Text>
+            <Text style={styles.errorTitle}>Unable to load delivery summary</Text>
             <Text style={styles.errorDesc}>{error}</Text>
             <Button
               title="Retry Fetch"
@@ -269,6 +253,7 @@ export default function WarningDeliverySummaryScreen() {
         ) : !warning ? (
           /* Not Found State */
           <EmptyState
+            appearance="light"
             iconName="alert-circle-outline"
             title="Warning Document Not Found"
             message={`No warning summary document was found in Cloud Firestore matching ID "${warningId}".`}
@@ -308,9 +293,7 @@ export default function WarningDeliverySummaryScreen() {
               <View style={styles.detailGrid}>
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Hazard Type:</Text>
-                  <Text style={styles.detailValueBold}>
-                    {warning.hazardType.toUpperCase()}
-                  </Text>
+                  <Text style={styles.detailValueBold}>{warning.hazardType.toUpperCase()}</Text>
                 </View>
 
                 <View style={styles.detailRow}>
@@ -322,9 +305,7 @@ export default function WarningDeliverySummaryScreen() {
 
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Target Areas:</Text>
-                  <Text style={styles.detailValue}>
-                    {warning.targetAreas.join(', ')}
-                  </Text>
+                  <Text style={styles.detailValue}>{warning.targetAreas.join(', ')}</Text>
                 </View>
 
                 <View style={styles.detailRow}>
@@ -337,7 +318,7 @@ export default function WarningDeliverySummaryScreen() {
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Selected Channels:</Text>
                   <Text style={styles.detailValue}>
-                    {warning.channels.map((c) => CHANNEL_CONFIG[c]?.label || c).join(', ')}
+                    {warning.channels.map(c => CHANNEL_CONFIG[c]?.label || c).join(', ')}
                   </Text>
                 </View>
 
@@ -357,10 +338,14 @@ export default function WarningDeliverySummaryScreen() {
 
             {/* Per-Channel Delivery Results Section */}
             <View style={styles.sectionHeaderBox}>
-              <Text style={styles.sectionTitle}>DELIVERY CHANNELS</Text>
+              <Text style={styles.sectionTitle}>Simulated delivery results</Text>
             </View>
+            <Text style={styles.detailValue}>
+              These are demo results, not confirmed delivery receipts. No real push notifications,
+              SMS messages or emergency sirens were sent.
+            </Text>
 
-            {logsToDisplay.map((log) => {
+            {logsToDisplay.map(log => {
               const cfg = CHANNEL_CONFIG[log.channel] || {
                 label: log.channel,
                 icon: 'notifications',
@@ -370,15 +355,13 @@ export default function WarningDeliverySummaryScreen() {
                 log.status === 'success' ||
                 (log.failedCount === 0 && log.deliveredCount > 0);
               const isFailed =
-                log.status === 'Failed' ||
-                log.status === 'failed' ||
-                log.deliveredCount === 0;
+                log.status === 'Failed' || log.status === 'failed' || log.deliveredCount === 0;
 
               const badgeColor = isSuccess
                 ? Colors.success
                 : isFailed
-                ? Colors.danger
-                : Colors.warning;
+                  ? Colors.danger
+                  : Colors.warning;
 
               return (
                 <Card key={log.channel} style={styles.channelCard}>
@@ -432,7 +415,7 @@ export default function WarningDeliverySummaryScreen() {
             <View style={styles.actionContainer}>
               {isDmcOfficer && (
                 <Button
-                  title="Escalate Warning (Raise Severity)"
+                  title={warning.severity === 'evacuation' ? 'Update warning' : 'Raise alert level'}
                   variant="danger"
                   size="lg"
                   icon={<Ionicons name="trending-up-outline" size={20} color="#FFFFFF" />}
@@ -453,7 +436,7 @@ export default function WarningDeliverySummaryScreen() {
         ) : null}
       </ScrollView>
 
-      <MobileNavBar />
+      <MobileNavBar appearance="light" />
     </ScreenContainer>
   );
 }
@@ -468,12 +451,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#0B132B',
+    backgroundColor: '#EAF2FF',
     paddingVertical: Spacing.xs + 2,
     paddingHorizontal: Spacing.md,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
     marginBottom: Spacing.md,
   },
   dutyDeskTitleRow: {
@@ -484,13 +467,13 @@ const styles = StyleSheet.create({
   dutyDeskLogoText: {
     fontSize: FontSize.micro,
     fontWeight: '900',
-    color: '#38BDF8',
+    color: '#0066FF',
     letterSpacing: 1,
   },
   dutyDeskDivider: {
     width: 1,
     height: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#DFE7F1',
   },
   dutyDeskSubText: {
     fontSize: FontSize.micro,
@@ -524,14 +507,14 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   backBtn: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: 20,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F8FAFD',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
   },
   navTitleBox: {
     flex: 1,
@@ -613,7 +596,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: '#DFE7F1',
     marginVertical: Spacing.md,
   },
   detailGrid: {
@@ -638,6 +621,8 @@ const styles = StyleSheet.create({
     marginLeft: Spacing.md,
   },
   detailValueBold: {
+    flex: 1,
+    marginLeft: 12,
     fontSize: FontSize.xs,
     color: Colors.text.primary,
     fontWeight: '800',
@@ -647,10 +632,10 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   sectionTitle: {
-    fontSize: FontSize.micro,
+    fontSize: FontSize.lg,
     fontWeight: '800',
     color: Colors.text.tertiary,
-    letterSpacing: 0.8,
+    letterSpacing: 0,
   },
   channelCard: {
     marginBottom: Spacing.md,
@@ -660,6 +645,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: Spacing.sm,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   channelTitleRow: {
     flexDirection: 'row',
@@ -685,6 +672,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.lg,
     marginTop: 4,
+    flexWrap: 'wrap',
   },
   countBadgeDelivered: {
     flexDirection: 'row',
@@ -733,8 +721,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginVertical: Spacing.md,
-    backgroundColor: '#0F172A',
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: '#F8FAFD',
+    borderColor: '#DFE7F1',
   },
   overallLabel: {
     fontSize: FontSize.sm,

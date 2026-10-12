@@ -1,3 +1,8 @@
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+jest.mock('@/services/resourceAuthorization', () => ({
+  requireDistrictOfficer: jest.fn(async () => 'district-officer'),
+  requireActiveResourceEvent: jest.fn(async () => {}),
+}));
 /**
  * Unit Tests for UC03 Shelter Deactivation & Reactivation Lifecycle.
  *
@@ -18,6 +23,14 @@ describe('UC03: Shelter Deactivation & Phasing-Down Workflow', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    installResourceFirestore({
+      'shelters/shelter-kalutara-03': {
+        status: 'active',
+        capacity: 150,
+        currentOccupancy: 0,
+        district: 'Kalutara',
+      },
+    });
   });
 
   describe('Deactivation Status Progression', () => {
@@ -30,7 +43,7 @@ describe('UC03: Shelter Deactivation & Phasing-Down Workflow', () => {
         expect.objectContaining({
           status: 'inactive',
           hazardEventId: '',
-        }),
+        })
       );
     });
 
@@ -42,7 +55,7 @@ describe('UC03: Shelter Deactivation & Phasing-Down Workflow', () => {
         expect.objectContaining({
           currentOccupancy: 0,
           status: 'active',
-        }),
+        })
       );
 
       // Step 2: Officer deactivates safe haven
@@ -52,7 +65,7 @@ describe('UC03: Shelter Deactivation & Phasing-Down Workflow', () => {
         expect.objectContaining({
           status: 'inactive',
           hazardEventId: '',
-        }),
+        })
       );
     });
   });
@@ -60,6 +73,9 @@ describe('UC03: Shelter Deactivation & Phasing-Down Workflow', () => {
   describe('Shelter Reactivation for Subsequent Hazard Event', () => {
     it('allows an inactive shelter to be reactivated for a new hazard event', async () => {
       // Cyclone Alert 2026 strikes coastal sector; shelter is reactivated
+      installResourceFirestore({
+        ['shelters/' + shelterId]: { status: 'inactive', district: 'Kalutara' },
+      });
       await activateShelter(shelterId, 'event-cyclone-nivar-2026');
 
       expect(updateDoc).toHaveBeenCalledWith(
@@ -67,7 +83,7 @@ describe('UC03: Shelter Deactivation & Phasing-Down Workflow', () => {
         expect.objectContaining({
           status: 'active',
           hazardEventId: 'event-cyclone-nivar-2026',
-        }),
+        })
       );
     });
   });
@@ -83,7 +99,7 @@ describe('UC03: Shelter Deactivation & Phasing-Down Workflow', () => {
 
       // Operational picture only counts shelters operating in current hazard response
       const operationalShelters = allShelters.filter(
-        (s) => s.status === 'active' || s.status === 'over_capacity',
+        s => s.status === 'active' || s.status === 'over_capacity'
       );
 
       const activeCapacity = operationalShelters.reduce((acc, s) => acc + s.capacity, 0);

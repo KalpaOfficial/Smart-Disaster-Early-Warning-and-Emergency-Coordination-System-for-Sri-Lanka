@@ -1,3 +1,4 @@
+import { AppAlert } from '@/utils/appNotice';
 /**
  * Report Detail Modal Component for UC02: Submit and Verify Ground Report.
  * Displays high-resolution evidence photo, interactive coordinates, metadata,
@@ -14,10 +15,9 @@ import {
   Pressable,
   TextInput,
   ActivityIndicator,
-  Alert,
   Platform,
 } from 'react-native';
-import { Image } from 'expo-image';
+import { ReportPhotoGallery } from './ReportPhotoGallery';
 import { Ionicons } from '@expo/vector-icons';
 import { ReportStatusBadge } from './ReportStatusBadge';
 import { ObservationTypeBadge } from './ObservationTypeBadge';
@@ -37,7 +37,7 @@ interface ReportDetailModalProps {
     reportId: string,
     hazardEventId?: string | null,
     hazardEventTitle?: string | null,
-    decisionNote?: string,
+    decisionNote?: string
   ) => Promise<void>;
   onReject?: (reportId: string, reason: string) => Promise<void>;
   onRequestInfo?: (reportId: string, message: string) => Promise<void>;
@@ -77,19 +77,22 @@ export function ReportDetailModal({
     if (!onVerify) return;
     try {
       setActionLoading(true);
-      const ev = activeEvents.find((e) => e.id === selectedEventId);
+      const ev = activeEvents.find(e => e.id === selectedEventId);
       await onVerify(
         report.id,
         selectedEventId || null,
         ev?.title || null,
-        decisionText || 'Verified by DMC Duty Officer.',
+        decisionText || 'Verified by DMC Duty Officer.'
       );
-      Alert.alert('Report Verified', 'The report has been verified and attached as supporting evidence.');
+      AppAlert.alert(
+        'Report Verified',
+        'The report has been verified and attached as supporting evidence.'
+      );
       setActiveAction(null);
       setDecisionText('');
       onClose();
     } catch (err) {
-      Alert.alert('Verification Error', (err as Error)?.message || 'Failed to verify report.');
+      AppAlert.alert('Verification Error', (err as Error)?.message || 'Failed to verify report.');
     } finally {
       setActionLoading(false);
     }
@@ -98,18 +101,21 @@ export function ReportDetailModal({
   const handleReject = async () => {
     if (!onReject) return;
     if (!decisionText.trim()) {
-      Alert.alert('Reason Required', 'Please provide a clear justification for rejecting this report.');
+      AppAlert.alert(
+        'Reason Required',
+        'Please provide a clear justification for rejecting this report.'
+      );
       return;
     }
     try {
       setActionLoading(true);
       await onReject(report.id, decisionText);
-      Alert.alert('Report Rejected', 'The report has been marked as rejected and logged.');
+      AppAlert.alert('Report Rejected', 'The report has been marked as rejected and logged.');
       setActiveAction(null);
       setDecisionText('');
       onClose();
     } catch (err) {
-      Alert.alert('Rejection Error', (err as Error)?.message || 'Failed to reject report.');
+      AppAlert.alert('Rejection Error', (err as Error)?.message || 'Failed to reject report.');
     } finally {
       setActionLoading(false);
     }
@@ -118,18 +124,21 @@ export function ReportDetailModal({
   const handleRequestInfo = async () => {
     if (!onRequestInfo) return;
     if (!decisionText.trim()) {
-      Alert.alert('Message Required', 'Please specify what additional information is required.');
+      AppAlert.alert('Message Required', 'Please specify what additional information is required.');
       return;
     }
     try {
       setActionLoading(true);
       await onRequestInfo(report.id, decisionText);
-      Alert.alert('Information Requested', 'The submitter has been notified to provide further details.');
+      AppAlert.alert(
+        'Information Requested',
+        'The submitter has been notified to provide further details.'
+      );
       setActiveAction(null);
       setDecisionText('');
       onClose();
     } catch (err) {
-      Alert.alert('Request Error', (err as Error)?.message || 'Failed to request info.');
+      AppAlert.alert('Request Error', (err as Error)?.message || 'Failed to request info.');
     } finally {
       setActionLoading(false);
     }
@@ -138,17 +147,20 @@ export function ReportDetailModal({
   const handleSubmitReply = async () => {
     if (!onSubmitAdditionalInfo) return;
     if (!infoReplyText.trim()) {
-      Alert.alert('Information Required', 'Please enter your clarification response.');
+      AppAlert.alert('Information Required', 'Please enter your clarification response.');
       return;
     }
     try {
       setActionLoading(true);
       await onSubmitAdditionalInfo(report.id, infoReplyText);
-      Alert.alert('Clarification Sent', 'Your report has returned to the verification queue.');
+      AppAlert.alert('Clarification Sent', 'Your report has returned to the verification queue.');
       setInfoReplyText('');
       onClose();
     } catch (err) {
-      Alert.alert('Submission Error', (err as Error)?.message || 'Failed to submit additional info.');
+      AppAlert.alert(
+        'Submission Error',
+        (err as Error)?.message || 'Failed to submit additional info.'
+      );
     } finally {
       setActionLoading(false);
     }
@@ -195,13 +207,10 @@ export function ReportDetailModal({
             </View>
 
             {/* Evidence Photograph */}
-            {report.photoUrl ? (
+            {report.photoUrls?.length || report.photoUrl ? (
               <View style={styles.photoContainer}>
-                <Image
-                  source={{ uri: report.photoUrl }}
-                  style={styles.photo}
-                  contentFit="cover"
-                  transition={250}
+                <ReportPhotoGallery
+                  urls={report.photoUrls?.length ? report.photoUrls : [report.photoUrl]}
                 />
               </View>
             ) : null}
@@ -229,8 +238,8 @@ export function ReportDetailModal({
                 <View style={styles.telemetryRow}>
                   <Ionicons name="navigate-circle-outline" size={16} color={Colors.text.tertiary} />
                   <Text style={styles.telemetryMuted}>
-                    {report.location.latitude.toFixed(5)}° N, {report.location.longitude.toFixed(5)}° E
-                    {report.isManualLocation ? ' (Manually Placed)' : ' (GPS Acquired)'}
+                    {report.location.latitude.toFixed(5)}° N, {report.location.longitude.toFixed(5)}
+                    ° E{report.isManualLocation ? ' (Manually Placed)' : ' (GPS Acquired)'}
                   </Text>
                 </View>
 
@@ -274,7 +283,8 @@ export function ReportDetailModal({
                   </Text>
                 </View>
                 <Text style={styles.decisionText}>
-                  {report.verificationDecision || 'This observation was officially verified by the DMC Duty Officer.'}
+                  {report.verificationDecision ||
+                    'This observation was officially verified by the DMC Duty Officer.'}
                 </Text>
                 {report.hazardEventTitle && (
                   <TouchableOpacity
@@ -289,10 +299,16 @@ export function ReportDetailModal({
                   >
                     <Ionicons name="link-outline" size={13} color={Colors.accent.primary} />
                     <Text style={styles.linkedEventText}>
-                      Linked Hazard: <Text style={styles.linkedEventHighlight}>{report.hazardEventTitle}</Text>
+                      Linked Hazard:{' '}
+                      <Text style={styles.linkedEventHighlight}>{report.hazardEventTitle}</Text>
                     </Text>
                     {report.hazardEventId && onOpenLinkedEvent && (
-                      <Ionicons name="arrow-forward" size={12} color={Colors.accent.primary} style={{ marginLeft: 2 }} />
+                      <Ionicons
+                        name="arrow-forward"
+                        size={12}
+                        color={Colors.accent.primary}
+                        style={{ marginLeft: 2 }}
+                      />
                     )}
                   </TouchableOpacity>
                 )}
@@ -320,7 +336,8 @@ export function ReportDetailModal({
                 </View>
                 <Text style={styles.rejectionReasonLabel}>Official Rejection Reason:</Text>
                 <Text style={styles.rejectionReasonText}>
-                  {report.verificationDecision || 'This observation was reviewed and marked as unverified.'}
+                  {report.verificationDecision ||
+                    'This observation was reviewed and marked as unverified.'}
                 </Text>
                 <View style={styles.decisionFooterRow}>
                   <Text style={styles.decisionOfficer}>
@@ -428,15 +445,19 @@ export function ReportDetailModal({
                       {activeAction === 'verify'
                         ? 'Confirm Verification & Link Event'
                         : activeAction === 'reject'
-                        ? 'Reject Report with Rationale'
-                        : 'Request Information from Submitter'}
+                          ? 'Reject Report with Rationale'
+                          : 'Request Information from Submitter'}
                     </Text>
 
                     {activeAction === 'verify' && (
                       <View style={{ marginBottom: Spacing.sm }}>
                         <Text style={styles.miniLabel}>Link to Open Hazard Event (Optional):</Text>
                         {activeEvents.length > 0 ? (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 4 }}>
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            style={{ marginVertical: 4 }}
+                          >
                             <TouchableOpacity
                               style={[
                                 styles.eventChip,
@@ -453,14 +474,16 @@ export function ReportDetailModal({
                                 None (Standalone)
                               </Text>
                             </TouchableOpacity>
-                            {activeEvents.map((ev) => (
+                            {activeEvents.map(ev => (
                               <TouchableOpacity
                                 key={ev.id}
                                 style={[
                                   styles.eventChip,
                                   selectedEventId === ev.id && styles.eventChipActive,
                                 ]}
-                                onPress={() => setSelectedEventId(selectedEventId === ev.id ? '' : ev.id)}
+                                onPress={() =>
+                                  setSelectedEventId(selectedEventId === ev.id ? '' : ev.id)
+                                }
                               >
                                 <Text
                                   style={[
@@ -490,8 +513,8 @@ export function ReportDetailModal({
                         activeAction === 'verify'
                           ? 'Optional review notes (e.g. Confirmed with Grama Niladhari)...'
                           : activeAction === 'reject'
-                          ? 'Enter reason for rejection (required)...'
-                          : 'Enter specific clarification needed...'
+                            ? 'Enter reason for rejection (required)...'
+                            : 'Enter specific clarification needed...'
                       }
                       placeholderTextColor={Colors.input.placeholder}
                       multiline
@@ -517,8 +540,8 @@ export function ReportDetailModal({
                           activeAction === 'verify'
                             ? styles.btnVerify
                             : activeAction === 'reject'
-                            ? styles.btnReject
-                            : styles.btnInfo,
+                              ? styles.btnReject
+                              : styles.btnInfo,
                           pressed && styles.btnPressed,
                           actionLoading && styles.btnDisabled,
                         ]}
@@ -526,8 +549,8 @@ export function ReportDetailModal({
                           activeAction === 'verify'
                             ? handleVerify
                             : activeAction === 'reject'
-                            ? handleReject
-                            : handleRequestInfo
+                              ? handleReject
+                              : handleRequestInfo
                         }
                         disabled={actionLoading}
                       >
@@ -538,8 +561,8 @@ export function ReportDetailModal({
                             {activeAction === 'verify'
                               ? 'Confirm Verification'
                               : activeAction === 'reject'
-                              ? 'Confirm Rejection'
-                              : 'Send Request'}
+                                ? 'Confirm Rejection'
+                                : 'Send Request'}
                           </Text>
                         )}
                       </Pressable>
@@ -610,7 +633,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   photoContainer: {
-    height: 220,
+    minHeight: 220,
     borderRadius: BorderRadius.lg,
     overflow: 'hidden',
     backgroundColor: '#000',

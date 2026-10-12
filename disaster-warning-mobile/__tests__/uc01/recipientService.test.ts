@@ -1,12 +1,19 @@
 /**
  * Unit Tests for UC01 Recipient Resolution Service (`services/recipientService.ts`).
  */
-import {
-  resolveDistrictsFromTargetAreas,
-  resolveRecipients,
-} from '@/services/recipientService';
+import { resolveDistrictsFromTargetAreas, resolveRecipients } from '@/services/recipientService';
 
+import { getDocs } from 'firebase/firestore';
 describe('UC01 Recipient Resolution Service', () => {
+  it('reports lookup failure separately from a successful empty audience', async () => {
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    (getDocs as jest.Mock).mockRejectedValueOnce(new Error('Firestore unavailable'));
+    await expect(resolveRecipients('district', ['Colombo'])).rejects.toThrow(
+      'Could not check registered recipients'
+    );
+    log.mockRestore();
+    expect((await resolveRecipients('district', ['Colombo'])).recipientCount).toBe(0);
+  });
   describe('resolveDistrictsFromTargetAreas', () => {
     it('should return empty array when targetAreas is empty', () => {
       const districts = resolveDistrictsFromTargetAreas('district', []);
@@ -39,7 +46,7 @@ describe('UC01 Recipient Resolution Service', () => {
     it('should handle overlapping districts across multiple river basins', () => {
       const districts = resolveDistrictsFromTargetAreas('river_basin', [
         'Nilwala River Basin', // Matara, Galle
-        'Gin River Basin',     // Galle, Matara
+        'Gin River Basin', // Galle, Matara
       ]);
       // Should deduplicate Matara and Galle
       expect(districts.sort()).toEqual(['Galle', 'Matara']);

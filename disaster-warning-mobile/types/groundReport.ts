@@ -9,11 +9,7 @@ import type { UserRole } from './auth';
  * Case Study 02 / UC02 Main Flow Step 3:
  * 'rising_water' | 'blocked_road' | 'landslide_crack' | 'other'
  */
-export type ObservationType =
-  | 'rising_water'
-  | 'blocked_road'
-  | 'landslide_crack'
-  | 'other';
+export type ObservationType = 'rising_water' | 'blocked_road' | 'landslide_crack' | 'other';
 
 /**
  * Lifecycle verification status of a ground report.
@@ -22,11 +18,7 @@ export type ObservationType =
  * - 'rejected': Officer rejected report with recorded rationale; does NOT influence warnings.
  * - 'info_requested': Officer requested further evidence/details from the citizen/volunteer.
  */
-export type ReportStatus =
-  | 'pending_verification'
-  | 'verified'
-  | 'rejected'
-  | 'info_requested';
+export type ReportStatus = 'pending_verification' | 'verified' | 'rejected' | 'info_requested';
 
 /**
  * Geographic GPS coordinates.
@@ -47,6 +39,8 @@ export interface GroundReport {
   observationType: ObservationType;
   description: string;
   photoUrl: string;
+  photoUrls?: string[];
+  photoPaths?: string[];
   photoPath?: string | null;
   location: GeoLocation;
   locationName: string;
@@ -76,6 +70,7 @@ export interface CreateGroundReportData {
   observationType: ObservationType;
   description: string;
   photoUri: string; // Local device URI (file://...) before upload
+  photoUris?: string[];
   location: GeoLocation;
   locationName: string;
   district: string;
@@ -100,8 +95,9 @@ export interface VerifyReportPayload {
  */
 export interface OfflineReportQueueItem {
   queueId: string;
-  reportData: Omit<CreateGroundReportData, 'photoUri'>;
+  reportData: Omit<CreateGroundReportData, 'photoUri' | 'photoUris'>;
   localPhotoUri: string;
+  localPhotoUris?: string[];
   submitterId: string;
   submitterName: string;
   submitterRole: UserRole;

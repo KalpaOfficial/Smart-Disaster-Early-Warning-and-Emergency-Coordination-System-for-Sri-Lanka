@@ -1,3 +1,5 @@
+import { requireDistrictOfficer, requireActiveResourceEvent } from './resourceAuthorization';
+import { validateRescueTeam, validateTeamTransition } from '@/utils/resourceValidation';
 /**
  * Rescue team coordination service — Pure Cloud Firestore CRUD.
  * Implements UC03 rescue team coordination: register, dispatch, update status.
@@ -10,9 +12,9 @@ import {
   getDocs,
   doc,
   addDoc,
-  updateDoc,
   serverTimestamp,
   onSnapshot,
+  runTransaction,
   type Unsubscribe,
   type DocumentData,
   type QueryDocumentSnapshot,
@@ -33,11 +35,11 @@ function mapTeamDoc(docSnap: QueryDocumentSnapshot<DocumentData>): RescueTeam {
     specialisation: d.specialisation || 'Water / Flood Rescue',
     status: d.status || 'available',
     district: d.district || '',
-    assignedLocation: d.assignedLocation,
-    hazardEventId: d.hazardEventId,
+    assignedLocation: d.assignedLocation || '',
+    hazardEventId: d.hazardEventId || '',
     createdBy: d.createdBy || '',
     createdAt: d.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-    lastStatusUpdate: d.lastStatusUpdate?.toDate?.()?.toISOString(),
+    lastStatusUpdate: d.lastStatusUpdate?.toDate?.()?.toISOString() || '',
   };
 }
 
@@ -47,10 +49,7 @@ function mapTeamDoc(docSnap: QueryDocumentSnapshot<DocumentData>): RescueTeam {
 export async function getTeams(hazardEventId?: string): Promise<RescueTeam[]> {
   let q;
   if (hazardEventId) {
-    q = query(
-      collection(db, COLLECTION),
-      where('hazardEventId', '==', hazardEventId),
-    );
+    q = query(collection(db, COLLECTION), where('hazardEventId', '==', hazardEventId));
   } else {
     q = query(collection(db, COLLECTION));
   }
@@ -65,19 +64,16 @@ export async function getTeams(hazardEventId?: string): Promise<RescueTeam[]> {
  */
 export function onTeamsChanged(
   hazardEventId: string | undefined,
-  callback: (teams: RescueTeam[]) => void,
+  callback: (teams: RescueTeam[]) => void
 ): Unsubscribe {
   let q;
   if (hazardEventId) {
-    q = query(
-      collection(db, COLLECTION),
-      where('hazardEventId', '==', hazardEventId),
-    );
+    q = query(collection(db, COLLECTION), where('hazardEventId', '==', hazardEventId));
   } else {
     q = query(collection(db, COLLECTION));
   }
 
-  return onSnapshot(q, (snapshot) => {
+  return onSnapshot(q, snapshot => {
     const teams = snapshot.docs.map(mapTeamDoc);
     callback(teams);
   });
@@ -86,14 +82,13 @@ export function onTeamsChanged(
 /**
  * Register a new rescue team in Cloud Firestore (UC03 steps 51–52).
  */
-export async function createTeam(
-  data: CreateRescueTeamData,
-  userId: string,
-): Promise<string> {
+export async function createTeam(data: CreateRescueTeamData, _userId: string): Promise<string> {
+  const officerId = await requireDistrictOfficer();
+  validateRescueTeam(data);
   const docRef = await addDoc(collection(db, COLLECTION), {
     ...data,
     status: 'available' as TeamStatus,
-    createdBy: userId,
+    createdBy: officerId,
     createdAt: serverTimestamp(),
   });
 
@@ -106,30 +101,44 @@ export async function createTeam(
 export async function dispatchTeam(
   teamId: string,
   assignedLocation: string,
-  hazardEventId: string,
+  hazardEventId: string
 ): Promise<void> {
-  await updateDoc(doc(db, COLLECTION, teamId), {
-    status: 'dispatched' as TeamStatus,
-    assignedLocation,
-    hazardEventId,
-    lastStatusUpdate: serverTimestamp(),
+  await requireDistrictOfficer();
+  if (!assignedLocation.trim() || !hazardEventId)
+    throw new Error('Choose a response location and an active hazard event.');
+  const teamRef = doc(db, COLLECTION, teamId);
+  await runTransaction(db, async transaction => {
+    const team = await transaction.get(teamRef);
+    if (!team.exists()) throw new Error('Rescue team not found.');
+    if (team.data().status !== 'available')
+      throw new Error('Only available rescue teams can be dispatched.');
+    await requireActiveResourceEvent(hazardEventId, team.data().district, ref =>
+      transaction.get(ref)
+    );
+    transaction.update(teamRef, {
+      status: 'dispatched' as TeamStatus,
+      assignedLocation: assignedLocation.trim(),
+      hazardEventId,
+      lastStatusUpdate: serverTimestamp(),
+    });
   });
 }
 
 /**
  * Update rescue team operational status in Cloud Firestore (UC03 steps 55–56).
  */
-export async function updateTeamStatus(
-  teamId: string,
-  status: TeamStatus,
-): Promise<void> {
-  const updates: Record<string, unknown> = {
-    status,
-    lastStatusUpdate: serverTimestamp(),
-  };
-  if (status === 'completed' || status === 'available') {
-    updates.assignedLocation = '';
-  }
-
-  await updateDoc(doc(db, COLLECTION, teamId), updates);
+export async function updateTeamStatus(teamId: string, status: TeamStatus): Promise<void> {
+  await requireDistrictOfficer();
+  await runTransaction(db, async transaction => {
+    const ref = doc(db, COLLECTION, teamId);
+    const team = await transaction.get(ref);
+    if (!team.exists()) throw new Error('Rescue team not found.');
+    validateTeamTransition(team.data().status, status);
+    const updates: Record<string, unknown> = { status, lastStatusUpdate: serverTimestamp() };
+    if (status === 'completed' || status === 'available' || status === 'unavailable') {
+      updates.assignedLocation = '';
+      if (status !== 'completed') updates.hazardEventId = '';
+    }
+    transaction.update(ref, updates);
+  });
 }

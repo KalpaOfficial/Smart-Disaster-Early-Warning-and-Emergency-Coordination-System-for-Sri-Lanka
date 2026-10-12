@@ -56,7 +56,7 @@ describe('UC02: Offline Queue Service', () => {
 
     await queueOfflineReport(
       { ...sampleReportData, description: 'Second road blockage observation' },
-      citizenSubmitter,
+      citizenSubmitter
     );
     expect(await getOfflineQueueCount()).toBe(2);
   });
@@ -65,7 +65,7 @@ describe('UC02: Offline Queue Service', () => {
     await queueOfflineReport(sampleReportData, citizenSubmitter);
     await queueOfflineReport(
       { ...sampleReportData, observationType: 'blocked_road' },
-      citizenSubmitter,
+      citizenSubmitter
     );
 
     const queued = await getQueuedReports();
@@ -78,7 +78,7 @@ describe('UC02: Offline Queue Service', () => {
     const item1 = await queueOfflineReport(sampleReportData, citizenSubmitter);
     const item2 = await queueOfflineReport(
       { ...sampleReportData, observationType: 'landslide_crack' },
-      citizenSubmitter,
+      citizenSubmitter
     );
 
     expect(await getOfflineQueueCount()).toBe(2);
@@ -96,7 +96,7 @@ describe('UC02: Offline Queue Service', () => {
     await recordSyncAttemptFailure(item.queueId, 'Network timeout connecting to Cloud Firestore');
 
     const updatedQueue = await getQueuedReports();
-    const updatedItem = updatedQueue.find((i) => i.queueId === item.queueId);
+    const updatedItem = updatedQueue.find(i => i.queueId === item.queueId);
 
     expect(updatedItem).toBeDefined();
     expect(updatedItem?.syncAttempts).toBe(1);
@@ -110,9 +110,72 @@ describe('UC02: Offline Queue Service', () => {
       role: 'dmc_officer' as const,
     };
 
-    await expect(
-      queueOfflineReport(sampleReportData, officerSubmitter),
-    ).rejects.toThrow(/Unauthorized/);
+    await expect(queueOfflineReport(sampleReportData, officerSubmitter)).rejects.toThrow(
+      /Unauthorized/
+    );
+  });
+
+  it('treats non-array stored data as an empty queue without modifying the raw data', async () => {
+    const raw = JSON.stringify({ invalid: 'queue' });
+    await AsyncStorage.setItem('@ground_reports_offline_queue_v1', raw);
+    expect(await getQueuedReports()).toEqual([]);
+    expect(await AsyncStorage.getItem('@ground_reports_offline_queue_v1')).toBe(raw);
+  });
+
+  it('updates only the failed report and handles legacy records without an attempts counter', async () => {
+    const first = await queueOfflineReport(sampleReportData, citizenSubmitter);
+    const second = await queueOfflineReport(sampleReportData, citizenSubmitter);
+    const legacy = { ...first, syncAttempts: undefined };
+    await AsyncStorage.setItem(
+      '@ground_reports_offline_queue_v1',
+      JSON.stringify([legacy, second])
+    );
+    await recordSyncAttemptFailure(first.queueId, 'Retry needed');
+    const queue = await getQueuedReports();
+    expect(queue[0]).toMatchObject({ syncAttempts: 1, lastSyncError: 'Retry needed' });
+    expect(queue[1]).toEqual(second);
+  });
+
+  it.each(['remove', 'failure'])(
+    'preserves queued evidence when storage rejects a %s update',
+    async operation => {
+      const item = await queueOfflineReport(sampleReportData, citizenSubmitter);
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('Storage full'));
+        if (operation === 'remove') await removeQueuedReport(item.queueId);
+        else await recordSyncAttemptFailure(item.queueId, 'Network error');
+        expect(await getQueuedReports()).toEqual([item]);
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(/Failed/), expect.any(Error));
+      } finally {
+        warn.mockRestore();
+      }
+    }
+  );
+
+  it('synchronizes a legacy single-photo item without a photo URI array', async () => {
+    const item = await queueOfflineReport(sampleReportData, citizenSubmitter);
+    const legacy = { ...item };
+    delete legacy.localPhotoUris;
+    expect((await syncSingleQueuedReport(legacy)).success).toBe(true);
+    expect(await getQueuedReports()).toEqual([]);
+  });
+
+  it('keeps a failed batch item in the queue while successfully synchronizing other items', async () => {
+    const failed = await queueOfflineReport(sampleReportData, citizenSubmitter);
+    await queueOfflineReport(sampleReportData, citizenSubmitter);
+    (globalThis.fetch as jest.Mock).mockRejectedValueOnce(new Error('Temporary read error'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const summary = await syncAllQueuedReports();
+      expect(summary).toMatchObject({ total: 2, syncedCount: 1, failedCount: 1 });
+      expect(summary.results.map(result => result.success)).toEqual([false, true]);
+      expect(await getQueuedReports()).toEqual([
+        expect.objectContaining({ queueId: failed.queueId, syncAttempts: 1 }),
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   describe('Delayed Synchronization Batch Processing (UC02 Steps 9-12 Offline)', () => {
@@ -141,7 +204,7 @@ describe('UC02: Offline Queue Service', () => {
       await queueOfflineReport(sampleReportData, citizenSubmitter);
       await queueOfflineReport(
         { ...sampleReportData, description: 'Second report' },
-        citizenSubmitter,
+        citizenSubmitter
       );
 
       const summary = await syncAllQueuedReports();
@@ -154,7 +217,7 @@ describe('UC02: Offline Queue Service', () => {
     it('records failure and retains report when photo upload fails during sync', async () => {
       const item = await queueOfflineReport(
         { ...sampleReportData, photoUri: 'file:///nonexistent/failed.jpg' },
-        citizenSubmitter,
+        citizenSubmitter
       );
 
       // Force upload failure for this test by simulating global fetch reject
@@ -177,7 +240,7 @@ describe('UC02: Offline Queue Service', () => {
     });
 
     it('gracefully handles corrupted AsyncStorage data by returning empty array', async () => {
-      await AsyncStorage.setItem('@ground_reports_offline_queue', 'NOT_VALID_JSON{{{');
+      await AsyncStorage.setItem('@ground_reports_offline_queue_v1', 'NOT_VALID_JSON{{{');
 
       const queue = await getQueuedReports();
       expect(queue).toEqual([]);

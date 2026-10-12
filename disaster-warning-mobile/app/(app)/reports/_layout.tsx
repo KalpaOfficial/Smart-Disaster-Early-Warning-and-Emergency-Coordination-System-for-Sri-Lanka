@@ -3,14 +3,14 @@
  * Manages transitions between report list, submit form, detail view, and offline queue.
  */
 import { Stack } from 'expo-router';
-import { Colors } from '@/constants/colors';
+import { LightColors } from '@/constants/colors';
 
 export default function ReportsLayout() {
   return (
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: Colors.bg.primary },
+        contentStyle: { backgroundColor: LightColors.background },
         animation: 'slide_from_right',
       }}
     >

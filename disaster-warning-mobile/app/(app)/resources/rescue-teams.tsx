@@ -1,39 +1,46 @@
+import { AppAlert } from '@/utils/appNotice';
+import { useFormFeedback } from '@/hooks/useFormFeedback';
+import {
+  requiredFields,
+  positiveQuantityError,
+  officerDistrictError,
+} from '@/utils/formValidation';
+import { FormError } from '@/components/FormError';
+import { MobileTypography } from '@/constants/colors';
+import { ResourceColors as Colors } from '@/components/ResourceComponents';
+import { ResourceDirectoryHeader } from '@/components/ResourceDirectoryHeader';
+import { canCoordinateResources } from '@/constants/resourcePermissions';
 /**
  * Rescue Teams Coordination Screen — UC03 Steps 51–56 + Alternate/Exception Flows.
  * Armed forces & NGO SAR dispatch, multi-stage mission telemetry, and real-time status transitions.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Alert,
   RefreshControl,
-  ScrollView,
+  ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { ScreenContainer } from '@/components/ScreenContainer';
-import { Card } from '@/components/Card';
-import { Button } from '@/components/Button';
-import { Input } from '@/components/Input';
-import { Select } from '@/components/Select';
-import { TeamStatusBadge, OrganisationBadge } from '@/components/Badge';
-import { FormModal } from '@/components/FormModal';
-import { EmptyState } from '@/components/EmptyState';
-import { MobileNavBar } from '@/components/MobileNavBar';
+import { ScreenContainer } from '@/components/ResourceComponents';
+import { Card } from '@/components/ResourceComponents';
+import { Button } from '@/components/ResourceComponents';
+import { Input } from '@/components/ResourceComponents';
+import { Select } from '@/components/ResourceComponents';
+import { StatusBar } from 'expo-status-bar';
+import { FormModal } from '@/components/ResourceComponents';
+import { EmptyState } from '@/components/ResourceComponents';
+import { MobileNavBar } from '@/components/ResourceComponents';
 import { useAuth } from '@/hooks/useAuth';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/colors';
+import { Spacing, BorderRadius } from '@/constants/colors';
 import { SRI_LANKAN_DISTRICTS, ORGANISATION_TYPES } from '@/constants/districts';
-import {
-  getTeams,
-  createTeam,
-  dispatchTeam,
-  updateTeamStatus,
-} from '@/services/rescueTeamService';
+import { getTeams, createTeam, dispatchTeam, updateTeamStatus } from '@/services/rescueTeamService';
 import { getActiveEvents } from '@/services/hazardEventService';
+import { filterRescueTeams, registeredTeamFilters } from '@/utils/rescueTeamDirectory';
 import type {
   RescueTeam,
   CreateRescueTeamData,
@@ -43,13 +50,34 @@ import type {
 } from '@/types/resources';
 
 const STATUS_FILTERS: { label: string; value: TeamStatus | 'all' }[] = [
-  { label: 'All Units', value: 'all' },
+  { label: 'All teams', value: 'all' },
   { label: 'Available', value: 'available' },
   { label: 'Dispatched', value: 'dispatched' },
   { label: 'En Route', value: 'en_route' },
   { label: 'On Site', value: 'on_site' },
   { label: 'Completed', value: 'completed' },
+  { label: 'Unavailable', value: 'unavailable' },
 ];
+
+const TEAM_STATUS_THEME: Record<TeamStatus, { label: string; color: string; background: string }> =
+  {
+    available: { label: 'Available', color: '#07834B', background: '#E5F7ED' },
+    dispatched: { label: 'Dispatched', color: '#075ADB', background: '#EAF2FF' },
+    en_route: { label: 'En route', color: '#A85E00', background: '#FFF4DF' },
+    on_site: { label: 'On site', color: '#087E99', background: '#E4F6FA' },
+    completed: { label: 'Completed', color: '#07834B', background: '#E5F7ED' },
+    unavailable: { label: 'Unavailable', color: '#B43545', background: '#FFF0F2' },
+  };
+
+function TeamStatusPill({ status }: { status: TeamStatus }) {
+  const theme = TEAM_STATUS_THEME[status];
+  return (
+    <View style={[styles.statusPill, { backgroundColor: theme.background }]}>
+      <View style={[styles.statusDot, { backgroundColor: theme.color }]} />
+      <Text style={[styles.statusText, { color: theme.color }]}>{theme.label}</Text>
+    </View>
+  );
+}
 
 const SPECIALISATION_OPTIONS = [
   { label: 'Water / Swift Flood Rescue', value: 'Water / Flood Rescue' },
@@ -59,38 +87,47 @@ const SPECIALISATION_OPTIONS = [
   { label: 'General Emergency Relief Logistics', value: 'General Disaster Relief' },
 ];
 
-const STATUS_TRANSITIONS: { [key in TeamStatus]?: { next: TeamStatus; label: string; icon: keyof typeof Ionicons.glyphMap }[] } = {
+const STATUS_TRANSITIONS: {
+  [key in TeamStatus]?: { next: TeamStatus; label: string; icon: keyof typeof Ionicons.glyphMap }[];
+} = {
   available: [
-    { next: 'dispatched', label: 'Dispatch to Sector', icon: 'paper-plane-outline' },
-    { next: 'unavailable', label: 'Flag Maintenance / Rest', icon: 'pause-circle-outline' },
+    { next: 'dispatched', label: 'Dispatch team', icon: 'paper-plane-outline' },
+    { next: 'unavailable', label: 'Mark unavailable', icon: 'pause-circle-outline' },
   ],
   dispatched: [
-    { next: 'en_route', label: 'Confirm En Route to Site', icon: 'navigate-outline' },
-    { next: 'on_site', label: 'Confirm Arrival On Site', icon: 'location-outline' },
-    { next: 'available', label: 'Abort & Return to Base', icon: 'return-down-back-outline' },
+    { next: 'en_route', label: 'Mark en route', icon: 'navigate-outline' },
+    { next: 'on_site', label: 'Confirm arrival', icon: 'location-outline' },
+    { next: 'available', label: 'Cancel deployment', icon: 'return-down-back-outline' },
+    { next: 'unavailable', label: 'Withdraw team', icon: 'pause-circle-outline' },
   ],
   en_route: [
-    { next: 'on_site', label: 'Confirm Unit On Site', icon: 'location-outline' },
-    { next: 'available', label: 'Mission Cancelled', icon: 'close-circle-outline' },
+    { next: 'on_site', label: 'Confirm arrival', icon: 'location-outline' },
+    { next: 'available', label: 'Cancel deployment', icon: 'close-circle-outline' },
+    { next: 'unavailable', label: 'Withdraw team', icon: 'pause-circle-outline' },
   ],
   on_site: [
-    { next: 'completed', label: 'Mission Accomplished', icon: 'checkmark-done-circle-outline' },
-    { next: 'available', label: 'Stand Down & Rest', icon: 'home-outline' },
+    { next: 'completed', label: 'Complete mission', icon: 'checkmark-done-circle-outline' },
+    { next: 'available', label: 'Return to available', icon: 'home-outline' },
+    { next: 'unavailable', label: 'Withdraw team', icon: 'pause-circle-outline' },
   ],
   completed: [
-    { next: 'available', label: 'Reset to Available Pool', icon: 'refresh-outline' },
+    { next: 'available', label: 'Mark available', icon: 'refresh-outline' },
+    { next: 'unavailable', label: 'Withdraw team', icon: 'pause-circle-outline' },
   ],
-  unavailable: [
-    { next: 'available', label: 'Restore Unit Availability', icon: 'play-circle-outline' },
-  ],
+  unavailable: [{ next: 'available', label: 'Mark available', icon: 'play-circle-outline' }],
 };
 
 export default function RescueTeamsScreen() {
-  const router = useRouter();
+  const compact = useWindowDimensions().width < 380;
   const { state: authState } = useAuth();
+  const canManage = canCoordinateResources(authState.user?.role);
+  const scopeDistrict = canManage ? authState.user?.district : undefined;
   const [teams, setTeams] = useState<RescueTeam[]>([]);
   const [events, setEvents] = useState<HazardEvent[]>([]);
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<TeamStatus | 'all'>('all');
+  const [search, setSearch] = useState('');
+  const [districtFilter, setDistrictFilter] = useState(authState.user?.district || '');
+  const [organisationFilter, setOrganisationFilter] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -106,26 +143,61 @@ export default function RescueTeamsScreen() {
     organisationType: 'armed_forces' as OrganisationType,
     memberCount: '',
     specialisation: 'Water / Flood Rescue',
-    district: 'Ratnapura',
+    district: authState.user?.district || '',
   });
   const [dispatchLocation, setDispatchLocation] = useState('');
   const [dispatchHazardEventId, setDispatchHazardEventId] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const registrationLock = useRef(false);
+  const loadRequest = useRef(0);
+  const registration = useFormFeedback(form, showRegister);
+  const { error: registerError, setError: setRegisterError } = registration;
+  const dispatch = useFormFeedback(
+    { location: dispatchLocation, eventId: dispatchHazardEventId },
+    showDispatch?.id
+  );
+  const statusFeedback = useFormFeedback({}, showStatusUpdate?.id);
+  const [loadError, setLoadError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    if (!success) return;
+    const timeout = setTimeout(() => setSuccess(''), 5000);
+    return () => clearTimeout(timeout);
+  }, [success]);
 
   const loadData = useCallback(async () => {
+    const request = ++loadRequest.current;
     try {
-      const [t, e] = await Promise.all([getTeams(), getActiveEvents()]);
-      setTeams(t);
-      setEvents(e);
-      if (e.length > 0 && !dispatchHazardEventId) {
-        setDispatchHazardEventId(e[0].id);
+      const [teamResult, eventResult] = await Promise.allSettled([getTeams(), getActiveEvents()]);
+      if (request !== loadRequest.current) return;
+      if (teamResult.status === 'fulfilled') {
+        setTeams(teamResult.value);
+        setLoadError('');
+      } else {
+        setLoadError('Could not refresh rescue teams. Pull down to retry.');
       }
-    } catch (_error) {
-      Alert.alert('Notice', 'Could not refresh rescue units. Please check network.');
+      if (eventResult.status === 'fulfilled') {
+        const districtEvents = eventResult.value.filter(
+          event => !scopeDistrict || event.affectedDistricts.includes(scopeDistrict)
+        );
+        setEvents(districtEvents);
+        setDispatchHazardEventId(current =>
+          districtEvents.some(event => event.id === current) ? current : districtEvents[0]?.id || ''
+        );
+      } else {
+        setEvents([]);
+        setDispatchHazardEventId('');
+        setLoadError(
+          current =>
+            current ||
+            'Teams loaded. Hazard events could not be refreshed; pull down to retry before dispatching.'
+        );
+      }
     } finally {
-      setLoading(false);
+      if (request === loadRequest.current) setLoading(false);
     }
-  }, [dispatchHazardEventId]);
+  }, [scopeDistrict]);
 
   useEffect(() => {
     loadData();
@@ -144,22 +216,30 @@ export default function RescueTeamsScreen() {
       organisationType: 'armed_forces',
       memberCount: '',
       specialisation: 'Water / Flood Rescue',
-      district: 'Ratnapura',
+      district: authState.user?.district || '',
     });
   };
 
   const handleRegister = async () => {
-    if (!form.name || !form.organisationName || !form.memberCount || !form.specialisation || !form.district) {
-      Alert.alert('Validation Error', 'Please complete all mandatory unit credentials.');
-      return;
-    }
+    if (!canManage || !authState.user || registrationLock.current) return;
+    setRegisterError('');
+    const errors = requiredFields(form, {
+      name: 'Team name',
+      organisationName: 'Organisation name',
+      memberCount: 'Number of members',
+      specialisation: 'Specialisation',
+      district: 'District',
+      organisationType: 'Organisation type',
+    });
+    const countError = positiveQuantityError(form.memberCount, 'Number of members');
+    if (countError) errors.memberCount = countError;
+    const districtError = officerDistrictError(form.district, scopeDistrict);
+    if (districtError) errors.district = districtError;
+    registration.setErrors(errors);
+    if (Object.keys(errors).length) return;
+    const members = Number(form.memberCount);
 
-    const members = parseInt(form.memberCount, 10);
-    if (isNaN(members) || members <= 0) {
-      Alert.alert('Validation Error', 'Crew personnel count must be a positive number.');
-      return;
-    }
-
+    registrationLock.current = true;
     setSubmitting(true);
     try {
       const teamData: CreateRescueTeamData = {
@@ -171,121 +251,189 @@ export default function RescueTeamsScreen() {
         district: form.district,
       };
 
-      await createTeam(teamData, authState.user?.id || 'officer');
-      Alert.alert('SAR Unit Registered', `"${form.name}" has been registered in the response grid.`);
+      const id = await createTeam(teamData, authState.user.id);
+      const savedTeam: RescueTeam = {
+        ...teamData,
+        id,
+        status: 'available',
+        createdBy: authState.user.id,
+        createdAt: new Date().toISOString(),
+        assignedLocation: '',
+        hazardEventId: '',
+        lastStatusUpdate: '',
+      };
+      setTeams(current => [savedTeam, ...current.filter(team => team.id !== id)]);
+      const filters = registeredTeamFilters(savedTeam);
+      setSearch(filters.search);
+      setDistrictFilter(filters.district);
+      setOrganisationFilter(filters.organisation);
+      setSelectedStatusFilter(filters.status);
+      setSuccess(`"${teamData.name}" registered and available in ${teamData.district}.`);
       setShowRegister(false);
       resetForm();
-      loadData();
+      await loadData();
     } catch (error) {
-      Alert.alert('Error', (error as Error).message);
+      setRegisterError(
+        error instanceof Error ? error.message : 'Could not register the team. Please try again.'
+      );
     } finally {
+      registrationLock.current = false;
       setSubmitting(false);
     }
   };
 
   const handleDispatch = async () => {
+    if (!canManage || submitting) return;
     if (!showDispatch) return;
-    if (!dispatchLocation.trim()) {
-      Alert.alert('Validation Error', 'Please specify target operational sector.');
-      return;
-    }
+    dispatch.setError('');
+    const errors = requiredFields(
+      { location: dispatchLocation, eventId: dispatchHazardEventId },
+      { location: 'Response location', eventId: 'Active hazard event' }
+    );
+    const event = events.find(event => event.id === dispatchHazardEventId);
+    if (!event) errors.eventId = `Select an active hazard event covering ${showDispatch.district}.`;
+    else if (!event.affectedDistricts.includes(showDispatch.district))
+      errors.eventId = `This event covers ${event.affectedDistricts.join(', ')}, but this rescue team belongs to ${showDispatch.district}. Select an event covering ${showDispatch.district}.`;
+    dispatch.setErrors(errors);
+    if (Object.keys(errors).length) return;
 
     setSubmitting(true);
     try {
-      await dispatchTeam(
-        showDispatch.id,
-        dispatchLocation.trim(),
-        dispatchHazardEventId || (events.length > 0 ? events[0].id : 'event-monsoon-2026'),
-      );
-      Alert.alert(
+      await dispatchTeam(showDispatch.id, dispatchLocation.trim(), dispatchHazardEventId);
+      AppAlert.alert(
         'Unit Dispatched',
-        `"${showDispatch.name}" dispatched to "${dispatchLocation.trim()}". Status updated to Dispatched.`,
+        `"${showDispatch.name}" dispatched to "${dispatchLocation.trim()}". Status updated to Dispatched.`
       );
       setShowDispatch(null);
       setDispatchLocation('');
       loadData();
     } catch (error) {
-      Alert.alert('Dispatch Error', (error as Error).message);
+      dispatch.setError(
+        (error as Error).message || 'Could not dispatch the team. Please try again.'
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleTransitionStatus = async (nextStatus: TeamStatus) => {
+    if (!canManage || submitting) return;
     if (!showStatusUpdate) return;
+    if (nextStatus === 'dispatched') {
+      setShowDispatch(showStatusUpdate);
+      setShowStatusUpdate(null);
+      return;
+    }
 
     setSubmitting(true);
     try {
-      await updateTeamStatus(
-        showStatusUpdate.id,
-        nextStatus,
+      await updateTeamStatus(showStatusUpdate.id, nextStatus);
+      AppAlert.alert(
+        'Status Logged',
+        `Unit status advanced to "${nextStatus.replace('_', ' ').toUpperCase()}".`
       );
-      Alert.alert('Status Logged', `Unit status advanced to "${nextStatus.replace('_', ' ').toUpperCase()}".`);
       setShowStatusUpdate(null);
       loadData();
     } catch (error) {
-      Alert.alert('Transition Error', (error as Error).message);
+      statusFeedback.setError((error as Error).message || 'Could not update the team status.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const filteredTeams = teams.filter((t) => {
-    if (selectedStatusFilter === 'all') return true;
-    return t.status === selectedStatusFilter;
+  const scopedTeams = filterRescueTeams(teams, {
+    search,
+    district: districtFilter,
+    organisation: organisationFilter,
+    status: 'all',
   });
+  const filteredTeams = scopedTeams.filter(
+    team => selectedStatusFilter === 'all' || team.status === selectedStatusFilter
+  );
 
   return (
     <ScreenContainer>
-      {/* Top Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton} activeOpacity={0.7}>
-          <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
-        </TouchableOpacity>
-        <View style={styles.headerTitleGroup}>
-          <Text style={styles.headerTitle}>Rescue Teams (SAR)</Text>
-          <Text style={styles.headerSubtitle}>
-            {teams.filter((t) => ['dispatched', 'en_route', 'on_site'].includes(t.status)).length} Active Deployments • Tactical Board
-          </Text>
-        </View>
-        <Button
-          title="Add Unit"
-          variant="primary"
-          size="sm"
-          icon={<Ionicons name="add" size={16} color="#FFFFFF" />}
-          onPress={() => setShowRegister(true)}
-        />
-      </View>
-
-      {/* Filter Tabs */}
-      <View style={styles.filterSection}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          {STATUS_FILTERS.map((tab) => {
-            const count = tab.value === 'all'
-              ? teams.length
-              : teams.filter((t) => t.status === tab.value).length;
-            const active = selectedStatusFilter === tab.value;
-
-            return (
-              <TouchableOpacity
-                key={tab.value}
-                onPress={() => setSelectedStatusFilter(tab.value)}
-                style={[styles.filterChip, active && styles.filterChipActive]}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
-                  {tab.label} ({count})
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
-
+      <StatusBar style="light" />
       {/* Teams List */}
       <FlatList
+        showsVerticalScrollIndicator={false}
         data={filteredTeams}
-        keyExtractor={(item) => item.id}
+        keyExtractor={item => item.id}
+        ListHeaderComponent={
+          <ResourceDirectoryHeader
+            title={canManage ? 'Manage rescue teams' : 'Rescue teams'}
+            description="Register, dispatch and monitor rescue teams."
+            icon="shield-outline"
+            search={search}
+            onSearch={setSearch}
+            placeholder="Search team, organisation or response location"
+            action={
+              canManage
+                ? {
+                    title: 'Register rescue team',
+                    onPress: () => {
+                      setRegisterError('');
+                      setShowRegister(true);
+                    },
+                  }
+                : undefined
+            }
+
+            directoryTitle="Rescue team directory"
+            count={filteredTeams.length}
+            loading={loading}
+          >
+            {!!success && (
+              <Text style={styles.successMessage} accessibilityLiveRegion="polite">
+                {success}
+              </Text>
+            )}
+            {!!loadError && (
+              <Text style={styles.errorMessage} accessibilityLiveRegion="polite">
+                {loadError}
+              </Text>
+            )}
+            <View style={[styles.filterRow, compact && { flexDirection: 'column' }]}>
+              <Select
+                value={districtFilter}
+                onSelect={setDistrictFilter}
+                options={[
+                  { value: '', label: 'All districts' },
+                  ...SRI_LANKAN_DISTRICTS.map(d => ({ value: d, label: d })),
+                ]}
+                containerStyle={styles.filterSelect}
+              />
+              <Select
+                value={organisationFilter}
+                onSelect={setOrganisationFilter}
+                options={[{ value: '', label: 'Any organisation' }, ...ORGANISATION_TYPES]}
+                containerStyle={styles.filterSelect}
+              />
+            </View>
+            <View style={styles.tabs}>
+              {STATUS_FILTERS.map(tab => {
+                const count =
+                  tab.value === 'all'
+                    ? scopedTeams.length
+                    : scopedTeams.filter(item => item.status === tab.value).length;
+                const active = selectedStatusFilter === tab.value;
+                return (
+                  <TouchableOpacity
+                    key={tab.value}
+                    onPress={() => setSelectedStatusFilter(tab.value)}
+                    style={[styles.filterChip, active && styles.filterChipActive]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                      {tab.label} ({count})
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ResourceDirectoryHeader>
+        }
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
@@ -295,34 +443,47 @@ export default function RescueTeamsScreen() {
           />
         }
         ListEmptyComponent={
-          !loading ? (
+          loading ? (
+            <ActivityIndicator style={{ marginTop: 30 }} color={Colors.accent.primary} />
+          ) : (
             <EmptyState
               iconName="shield-outline"
-              title="No Rescue Units Found"
+              title="No rescue teams yet"
               message={
                 selectedStatusFilter !== 'all'
                   ? `No teams currently with status "${selectedStatusFilter}".`
-                  : 'Register a rescue team from Armed Forces or Red Cross.'
+                  : canManage
+                    ? 'Add a team to start coordinating rescue operations.'
+                    : 'Registered rescue teams will appear here.'
               }
-              actionTitle="Register SAR Unit"
-              onAction={() => setShowRegister(true)}
+              actionTitle={canManage ? 'Add team' : undefined}
+              onAction={canManage ? () => setShowRegister(true) : undefined}
             />
-          ) : null
+          )
         }
         renderItem={({ item }) => (
           <Card style={styles.teamCard}>
             <View style={styles.cardHeader}>
+              <View style={styles.resourceIcon}>
+                <Ionicons name="shield-outline" size={23} color={Colors.accent.primary} />
+              </View>
               <View style={styles.headerLeft}>
                 <Text style={styles.teamName}>{item.name}</Text>
-                <View style={styles.badgeRow}>
-                  <TeamStatusBadge status={item.status} size="sm" />
-                  <OrganisationBadge type={item.organisationType} size="sm" />
-                </View>
+                <Text style={styles.cardCaption}>{item.district}</Text>
               </View>
+            </View>
+            <View style={styles.badgeRow}>
               <View style={styles.crewBadge}>
                 <Ionicons name="people-outline" size={14} color={Colors.accent.primary} />
                 <Text style={styles.crewCount}>{item.memberCount}</Text>
-                <Text style={styles.crewLabel}>CREW</Text>
+                <Text style={styles.crewLabel}>members</Text>
+              </View>
+              <TeamStatusPill status={item.status} />
+              <View style={styles.organisationPill}>
+                <Text style={styles.organisationText}>
+                  {ORGANISATION_TYPES.find(type => type.value === item.organisationType)?.label ||
+                    item.organisationType}
+                </Text>
               </View>
             </View>
 
@@ -331,13 +492,13 @@ export default function RescueTeamsScreen() {
               <View style={styles.metaRow}>
                 <Ionicons name="business-outline" size={13} color={Colors.text.tertiary} />
                 <Text style={styles.metaItem}>
-                  Authority: <Text style={styles.metaVal}>{item.organisationName}</Text>
+                  Organisation: <Text style={styles.metaVal}>{item.organisationName}</Text>
                 </Text>
               </View>
               <View style={styles.metaRow}>
                 <Ionicons name="location-sharp" size={13} color={Colors.accent.primary} />
                 <Text style={styles.metaItem}>
-                  Home Depot: <Text style={styles.metaVal}>{item.district} District</Text>
+                  District: <Text style={styles.metaVal}>{item.district}</Text>
                 </Text>
               </View>
               <View style={styles.metaRow}>
@@ -351,7 +512,7 @@ export default function RescueTeamsScreen() {
                 <View style={styles.deployedSectorBox}>
                   <View style={styles.sectorHeader}>
                     <Ionicons name="navigate" size={12} color={Colors.accent.primary} />
-                    <Text style={styles.sectorLabel}>ACTIVE DEPLOYMENT SECTOR</Text>
+                    <Text style={styles.sectorLabel}>Response location</Text>
                   </View>
                   <View style={styles.sectorTargetRow}>
                     <Ionicons name="locate" size={14} color={Colors.accent.primary} />
@@ -362,82 +523,105 @@ export default function RescueTeamsScreen() {
             </View>
 
             {/* Tactical Actions */}
-            <View style={styles.cardActions}>
-              {item.status === 'available' ? (
-                <Button
-                  title="Dispatch Unit to Sector"
-                  variant="primary"
-                  size="sm"
-                  icon={<Ionicons name="paper-plane" size={15} color="#FFFFFF" />}
-                  onPress={() => setShowDispatch(item)}
-                  style={styles.actionBtn}
-                />
-              ) : (
-                <Button
-                  title="Advance Mission Status"
-                  variant="outline"
-                  size="sm"
-                  icon={<Ionicons name="git-branch" size={15} color={Colors.accent.primary} />}
-                  onPress={() => setShowStatusUpdate(item)}
-                  style={styles.actionBtn}
-                />
-              )}
-            </View>
+            {canManage && (
+              <View style={styles.cardActions}>
+                {item.status === 'available' ? (
+                  <Button
+                    title="Dispatch team"
+                    variant="primary"
+                    size="sm"
+                    icon={<Ionicons name="paper-plane" size={15} color="#FFFFFF" />}
+                    onPress={() => setShowDispatch(item)}
+                    style={styles.actionBtn}
+                  />
+                ) : (
+                  <Button
+                    title="Update team status"
+                    variant="outline"
+                    size="sm"
+                    icon={<Ionicons name="git-branch" size={15} color={Colors.accent.primary} />}
+                    onPress={() => setShowStatusUpdate(item)}
+                    style={styles.actionBtn}
+                  />
+                )}
+                {item.status === 'available' && (
+                  <Button
+                    title="Update status"
+                    variant="outline"
+                    size="sm"
+                    onPress={() => setShowStatusUpdate(item)}
+                    style={styles.actionBtn}
+                  />
+                )}
+              </View>
+            )}
           </Card>
         )}
       />
 
       {/* Register Team Modal */}
       <FormModal
-        visible={showRegister}
-        title="Commission SAR Rescue Unit"
+        visible={canManage && showRegister}
+        title="Add rescue team"
+        feedbackKey={registration.attempt}
         onClose={() => setShowRegister(false)}
       >
+        {!!registerError && (
+          <Text style={styles.errorMessage} accessibilityRole="alert">
+            {registerError}
+          </Text>
+        )}
         <Input
-          label="Unit Call Sign / Name *"
+          label="Team name *"
+          error={registration.errors.name}
           placeholder="e.g. SL Army 58th Division Swift Flood Unit"
           value={form.name}
-          onChangeText={(v) => setForm({ ...form, name: v })}
+          onChangeText={v => setForm({ ...form, name: v })}
           icon={<Ionicons name="shield-outline" size={18} color={Colors.accent.primary} />}
         />
         <Select
-          label="Controlling Organization Type *"
+          label="Organisation type *"
+          error={registration.errors.organisationType}
           placeholder="Select organisation type"
           value={form.organisationType}
           options={ORGANISATION_TYPES}
-          onValueChange={(v) => setForm({ ...form, organisationType: v as OrganisationType })}
+          onValueChange={v => setForm({ ...form, organisationType: v as OrganisationType })}
         />
         <Input
           label="Organisation Name *"
+          error={registration.errors.organisationName}
           placeholder="e.g. Sri Lanka Army / Sri Lanka Navy / Red Cross"
           value={form.organisationName}
-          onChangeText={(v) => setForm({ ...form, organisationName: v })}
+          onChangeText={v => setForm({ ...form, organisationName: v })}
           icon={<Ionicons name="business-outline" size={18} color={Colors.accent.primary} />}
         />
         <Input
-          label="Deployable Personnel (Crew Count) *"
+          label="Number of members *"
+          error={registration.errors.memberCount}
           placeholder="e.g. 18"
           keyboardType="numeric"
           value={form.memberCount}
-          onChangeText={(v) => setForm({ ...form, memberCount: v })}
+          onChangeText={v => setForm({ ...form, memberCount: v })}
           icon={<Ionicons name="people-outline" size={18} color={Colors.accent.primary} />}
         />
         <Select
-          label="Stationing Base District *"
+          label="District *"
+          error={registration.errors.district || officerDistrictError(form.district, scopeDistrict)}
           placeholder="Select home district"
           value={form.district}
-          options={SRI_LANKAN_DISTRICTS.map((d) => ({ label: d, value: d }))}
-          onValueChange={(v) => setForm({ ...form, district: v })}
+          options={SRI_LANKAN_DISTRICTS.map(d => ({ label: d, value: d }))}
+          onValueChange={v => setForm({ ...form, district: v })}
         />
         <Select
-          label="Operational Specialisation *"
+          label="Specialisation *"
+          error={registration.errors.specialisation}
           placeholder="Select specialisation"
           value={form.specialisation}
           options={SPECIALISATION_OPTIONS}
-          onValueChange={(v) => setForm({ ...form, specialisation: v })}
+          onValueChange={v => setForm({ ...form, specialisation: v })}
         />
         <Button
-          title="Commission Unit"
+          title="Add team"
           variant="primary"
           loading={submitting}
           onPress={handleRegister}
@@ -447,22 +631,25 @@ export default function RescueTeamsScreen() {
 
       {/* Dispatch Modal */}
       <FormModal
-        visible={!!showDispatch}
+        visible={canManage && !!showDispatch}
         title={`Dispatch: ${showDispatch?.name}`}
+        feedbackKey={dispatch.attempt}
         onClose={() => {
           setShowDispatch(null);
           setDispatchLocation('');
         }}
       >
         <View style={styles.dispatchHeaderBox}>
-          <Text style={styles.dispatchBoxTitle}>UNIT READINESS</Text>
+          <Text style={styles.dispatchBoxTitle}>Team details</Text>
           <Text style={styles.dispatchBoxVal}>
-            {showDispatch?.memberCount} Crew Personnel • {showDispatch?.specialisation}
+            {showDispatch?.memberCount} members • {showDispatch?.specialisation}
           </Text>
         </View>
+        <FormError message={dispatch.error} />
 
         <Input
-          label="Target Deployment Sector / Map Coordinates *"
+          label="Response location *"
+          error={dispatch.errors.location}
           placeholder="e.g. Kalu Ganga Ayagama River Bank, Sector 4"
           value={dispatchLocation}
           onChangeText={setDispatchLocation}
@@ -470,18 +657,19 @@ export default function RescueTeamsScreen() {
         />
 
         <Select
-          label="Designated Hazard Event Association"
+          label="Active hazard event *"
+          error={dispatch.errors.eventId}
           value={dispatchHazardEventId}
-          options={events.map((e) => ({
+          options={events.map(e => ({
             value: e.id,
             label: e.title,
             description: `${e.affectedDistricts.join(', ')} • ${e.hazardType.toUpperCase()}`,
           }))}
-          onSelect={(val) => setDispatchHazardEventId(val)}
+          onSelect={val => setDispatchHazardEventId(val)}
         />
 
         <Button
-          title="Confirm Dispatch Order"
+          title="Dispatch team"
           variant="primary"
           loading={submitting}
           onPress={handleDispatch}
@@ -491,27 +679,27 @@ export default function RescueTeamsScreen() {
 
       {/* Advance Status Modal */}
       <FormModal
-        visible={!!showStatusUpdate}
-        title={`Advance Mission: ${showStatusUpdate?.name}`}
+        visible={canManage && !!showStatusUpdate}
+        title="Update team status"
+        feedbackKey={statusFeedback.attempt}
         onClose={() => setShowStatusUpdate(null)}
       >
         <View style={styles.statusCurrentCard}>
-          <Text style={styles.statusCurrentLabel}>CURRENT OPERATIONAL STATUS</Text>
+          <Text style={styles.statusCurrentLabel}>{showStatusUpdate?.name}</Text>
           <View style={styles.currentBadgeWrap}>
-            {showStatusUpdate && <TeamStatusBadge status={showStatusUpdate.status} size="md" />}
+            {showStatusUpdate && <TeamStatusPill status={showStatusUpdate.status} />}
           </View>
-          {showStatusUpdate?.assignedLocation && (
-            <Text style={styles.currentLocText}>
-              Sector: {showStatusUpdate.assignedLocation}
-            </Text>
+          {!!showStatusUpdate?.assignedLocation && (
+            <Text style={styles.currentLocText}>Sector: {showStatusUpdate.assignedLocation}</Text>
           )}
         </View>
 
-        <Text style={styles.transitionTitle}>SELECT NEXT OPERATIONAL STAGE</Text>
+        <Text style={styles.transitionTitle}>Choose the next status</Text>
+        <FormError message={statusFeedback.error} />
 
         <View style={styles.transitionList}>
           {showStatusUpdate &&
-            STATUS_TRANSITIONS[showStatusUpdate.status]?.map((item) => (
+            STATUS_TRANSITIONS[showStatusUpdate.status]?.map(item => (
               <TouchableOpacity
                 key={item.next}
                 onPress={() => handleTransitionStatus(item.next)}
@@ -524,7 +712,7 @@ export default function RescueTeamsScreen() {
                 </View>
                 <View style={styles.transitionContent}>
                   <Text style={styles.transitionLabel}>{item.label}</Text>
-                  <Text style={styles.transitionSub}>Advance state to {item.next.toUpperCase()}</Text>
+                  <Text style={styles.transitionSub}>{TEAM_STATUS_THEME[item.next].label}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={Colors.text.tertiary} />
               </TouchableOpacity>
@@ -539,81 +727,76 @@ export default function RescueTeamsScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.md,
-    gap: Spacing.md,
+  successMessage: {
+    ...MobileTypography.caption,
+    color: '#07834B',
+    backgroundColor: '#E5F7ED',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 12,
   },
-  backButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#0F172A',
+  errorMessage: {
+    ...MobileTypography.caption,
+    color: '#B43545',
+    backgroundColor: '#FFF0F2',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  filterRow: { flexDirection: 'row', gap: 8 },
+  filterSelect: { flex: 1, marginBottom: 10 },
+  tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  filterChip: {
+    paddingHorizontal: 12,
+    minHeight: 44,
+    maxWidth: '100%',
+    paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 11,
+    backgroundColor: '#F6F9FD',
   },
-  headerTitleGroup: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: FontSize.xl,
-    fontWeight: '900',
-    color: Colors.text.primary,
-  },
-  headerSubtitle: {
-    fontSize: FontSize.xs,
-    color: Colors.text.tertiary,
-    marginTop: 1,
-  },
-  filterSection: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing.md,
-  },
-  filterChip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs + 2,
-    borderRadius: BorderRadius.full,
-    backgroundColor: '#0F172A',
-    marginRight: Spacing.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  filterChipActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-    borderColor: Colors.accent.primary,
-  },
+  filterChipActive: { backgroundColor: '#EAF2FF' },
   filterChipText: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     color: Colors.text.secondary,
     fontWeight: '600',
+    flexShrink: 1,
+    textAlign: 'center',
   },
-  filterChipTextActive: {
-    color: Colors.accent.primary,
-    fontWeight: '700',
-  },
+  filterChipTextActive: { color: Colors.accent.primary },
   listContent: {
-    paddingHorizontal: Spacing.xl,
     paddingBottom: 110,
-    gap: Spacing.md,
   },
   teamCard: {
-    marginBottom: Spacing.xs,
+    marginHorizontal: 18,
+    marginBottom: 13,
+    padding: 16,
+    borderColor: '#E7EEF8',
+    shadowOpacity: 0,
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: Spacing.sm,
+    marginBottom: 12,
+    gap: 10,
   },
   headerLeft: {
     flex: 1,
   },
+  resourceIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: '#EAF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardCaption: { ...MobileTypography.caption, color: Colors.text.secondary },
   teamName: {
-    fontSize: FontSize.md + 1,
+    ...MobileTypography.body,
+
     fontWeight: '800',
     color: Colors.text.primary,
     marginBottom: 4,
@@ -622,40 +805,59 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.xs,
+    flexWrap: 'wrap',
+    marginBottom: 16,
   },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
+  },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusText: { ...MobileTypography.badge, fontWeight: '700' },
+  organisationPill: {
+    backgroundColor: '#F1F5FA',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  organisationText: { ...MobileTypography.badge, fontWeight: '600', color: Colors.text.secondary },
   crewBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    backgroundColor: '#EAF2FF',
     paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.sm,
+    paddingVertical: 8,
+    borderRadius: 12,
     gap: 4,
   },
   crewCount: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     fontWeight: '900',
     color: Colors.accent.primary,
   },
   crewLabel: {
-    fontSize: 9,
-    fontWeight: '800',
+    ...MobileTypography.badge,
+    fontWeight: '500',
     color: Colors.text.tertiary,
   },
   metaBox: {
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    padding: Spacing.md,
+    backgroundColor: 'transparent',
+    padding: 0,
     borderRadius: BorderRadius.md,
-    gap: 5,
+    gap: 12,
     marginBottom: Spacing.md,
   },
   metaRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    alignItems: 'flex-start',
+    gap: 8,
   },
   metaItem: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     color: Colors.text.secondary,
     flex: 1,
   },
@@ -665,23 +867,22 @@ const styles = StyleSheet.create({
   },
   deployedSectorBox: {
     marginTop: Spacing.xs,
-    backgroundColor: 'rgba(56, 189, 248, 0.1)',
-    padding: Spacing.sm,
+    backgroundColor: '#EAF2FF',
+    padding: 12,
     borderRadius: BorderRadius.sm,
     borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.25)',
+    borderColor: '#D6E5FF',
   },
   sectorHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginBottom: 2,
+    marginBottom: 6,
   },
   sectorLabel: {
-    fontSize: 9,
-    fontWeight: '800',
+    ...MobileTypography.caption,
+    fontWeight: '600',
     color: Colors.accent.primary,
-    letterSpacing: 0.5,
   },
   sectorTargetRow: {
     flexDirection: 'row',
@@ -689,9 +890,10 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   sectorTarget: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     fontWeight: '700',
     color: Colors.text.primary,
+    flex: 1,
   },
   cardActions: {
     flexDirection: 'row',
@@ -699,6 +901,8 @@ const styles = StyleSheet.create({
   },
   actionBtn: {
     flex: 1,
+    minHeight: 46,
+    borderRadius: 13,
   },
   modalSubmit: {
     marginTop: Spacing.lg,
@@ -712,28 +916,28 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   dispatchBoxTitle: {
-    fontSize: FontSize.micro,
+    ...MobileTypography.body,
     fontWeight: '800',
     color: Colors.accent.primary,
     letterSpacing: 0.5,
   },
   dispatchBoxVal: {
-    fontSize: FontSize.sm,
+    ...MobileTypography.caption,
     fontWeight: '700',
     color: Colors.text.primary,
     marginTop: 2,
   },
   statusCurrentCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: '#F6F9FD',
     padding: Spacing.md,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
     marginBottom: Spacing.lg,
     alignItems: 'center',
   },
   statusCurrentLabel: {
-    fontSize: FontSize.micro,
+    ...MobileTypography.caption,
     fontWeight: '800',
     color: Colors.text.tertiary,
     letterSpacing: 0.8,
@@ -743,11 +947,11 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   currentLocText: {
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     color: Colors.text.secondary,
   },
   transitionTitle: {
-    fontSize: FontSize.micro + 1,
+    ...MobileTypography.body,
     fontWeight: '800',
     color: Colors.text.tertiary,
     letterSpacing: 0.8,
@@ -760,11 +964,11 @@ const styles = StyleSheet.create({
   transitionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: '#FFFFFF',
     padding: Spacing.md,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#DFE7F1',
   },
   transitionIconBox: {
     width: 36,
@@ -779,12 +983,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   transitionLabel: {
-    fontSize: FontSize.sm,
+    ...MobileTypography.caption,
     fontWeight: '700',
     color: Colors.text.primary,
   },
   transitionSub: {
-    fontSize: FontSize.micro,
+    ...MobileTypography.caption,
     color: Colors.text.tertiary,
     marginTop: 1,
   },

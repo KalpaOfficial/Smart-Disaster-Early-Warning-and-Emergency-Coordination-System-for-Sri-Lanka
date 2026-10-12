@@ -5,7 +5,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BorderRadius, Spacing, FontSize } from '@/constants/colors';
+import { BorderRadius, Spacing, FontSize, MobileTypography } from '@/constants/colors';
 import { getObservationTypeDefinition } from '@/constants/observationTypes';
 import type { ObservationType } from '@/types/groundReport';
 
@@ -15,6 +15,7 @@ interface ObservationTypeBadgeProps {
   showIcon?: boolean;
   short?: boolean;
   style?: ViewStyle;
+  appearance?: 'dark' | 'light';
 }
 
 export function ObservationTypeBadge({
@@ -23,8 +24,18 @@ export function ObservationTypeBadge({
   showIcon = true,
   short = false,
   style,
+  appearance = 'dark',
 }: ObservationTypeBadgeProps) {
   const def = getObservationTypeDefinition(type);
+  const color =
+    appearance === 'light'
+      ? {
+          rising_water: '#0066CC',
+          blocked_road: '#946000',
+          landslide_crack: '#C52A39',
+          other: '#6941C6',
+        }[type] || '#6941C6'
+      : def.color;
 
   return (
     <View
@@ -32,10 +43,11 @@ export function ObservationTypeBadge({
         styles.badge,
         {
           backgroundColor: def.bgColor,
-          borderColor: def.color,
+          borderColor: color,
         },
         size === 'sm' && styles.badgeSm,
         size === 'lg' && styles.badgeLg,
+        appearance === 'light' && styles.lightBadge,
         style,
       ]}
     >
@@ -43,15 +55,16 @@ export function ObservationTypeBadge({
         <Ionicons
           name={def.icon}
           size={size === 'sm' ? 12 : size === 'lg' ? 16 : 14}
-          color={def.color}
+          color={color}
         />
       )}
       <Text
         style={[
           styles.text,
-          { color: def.color },
+          { color },
           size === 'sm' && styles.textSm,
           size === 'lg' && styles.textLg,
+          appearance === 'light' && styles.lightText,
         ]}
       >
         {short ? def.shortLabel : def.label}
@@ -61,6 +74,8 @@ export function ObservationTypeBadge({
 }
 
 const styles = StyleSheet.create({
+  lightBadge: { maxWidth: '100%', flexShrink: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  lightText: { ...MobileTypography.badge, flexShrink: 1, letterSpacing: 0 },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -1,3 +1,5 @@
+import { requireDistrictOfficer, requireActiveResourceEvent } from './resourceAuthorization';
+import { validateSupply, validateDistribution } from '@/utils/resourceValidation';
 /**
  * Relief supply tracking service — Pure Cloud Firestore CRUD.
  * Implements UC03 relief supplies: inventory tracking, distribution logging, and overdraft checks.
@@ -9,11 +11,11 @@ import {
   where,
   getDocs,
   doc,
-  getDoc,
   addDoc,
   updateDoc,
   serverTimestamp,
   onSnapshot,
+  runTransaction,
   type Unsubscribe,
   type DocumentData,
   type QueryDocumentSnapshot,
@@ -37,7 +39,8 @@ function mapSupplyDoc(docSnap: QueryDocumentSnapshot<DocumentData>): ReliefSuppl
     itemName: d.itemName || '',
     type: d.type || 'food',
     totalQuantity: d.totalQuantity || 0,
-    remainingQuantity: d.remainingQuantity !== undefined ? d.remainingQuantity : d.totalQuantity || 0,
+    remainingQuantity:
+      d.remainingQuantity !== undefined ? d.remainingQuantity : d.totalQuantity || 0,
     unit: d.unit || 'packs',
     organisationType: d.organisationType || 'ngo',
     organisationName: d.organisationName || '',
@@ -46,6 +49,7 @@ function mapSupplyDoc(docSnap: QueryDocumentSnapshot<DocumentData>): ReliefSuppl
     createdBy: d.createdBy || '',
     createdAt: d.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
     updatedAt: d.updatedAt?.toDate?.()?.toISOString(),
+    availability: d.availability || 'available',
   };
 }
 
@@ -63,6 +67,9 @@ function mapDistDoc(docSnap: QueryDocumentSnapshot<DocumentData>): Distribution 
     distributedBy: d.distributedBy || '',
     hazardEventId: d.hazardEventId || '',
     distributedAt: d.distributedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+    supplyType: d.supplyType,
+    organisationType: d.organisationType,
+    organisationName: d.organisationName,
   };
 }
 
@@ -72,10 +79,7 @@ function mapDistDoc(docSnap: QueryDocumentSnapshot<DocumentData>): Distribution 
 export async function getSupplies(hazardEventId?: string): Promise<ReliefSupply[]> {
   let q;
   if (hazardEventId) {
-    q = query(
-      collection(db, SUPPLY_COLLECTION),
-      where('hazardEventId', '==', hazardEventId),
-    );
+    q = query(collection(db, SUPPLY_COLLECTION), where('hazardEventId', '==', hazardEventId));
   } else {
     q = query(collection(db, SUPPLY_COLLECTION));
   }
@@ -90,14 +94,14 @@ export async function getSupplies(hazardEventId?: string): Promise<ReliefSupply[
  */
 export async function getSuppliesByType(
   type: SupplyType,
-  hazardEventId?: string,
+  hazardEventId?: string
 ): Promise<ReliefSupply[]> {
   let q;
   if (hazardEventId) {
     q = query(
       collection(db, SUPPLY_COLLECTION),
       where('type', '==', type),
-      where('hazardEventId', '==', hazardEventId),
+      where('hazardEventId', '==', hazardEventId)
     );
   } else {
     q = query(collection(db, SUPPLY_COLLECTION), where('type', '==', type));
@@ -112,19 +116,16 @@ export async function getSuppliesByType(
  */
 export function onSuppliesChanged(
   hazardEventId: string | undefined,
-  callback: (supplies: ReliefSupply[]) => void,
+  callback: (supplies: ReliefSupply[]) => void
 ): Unsubscribe {
   let q;
   if (hazardEventId) {
-    q = query(
-      collection(db, SUPPLY_COLLECTION),
-      where('hazardEventId', '==', hazardEventId),
-    );
+    q = query(collection(db, SUPPLY_COLLECTION), where('hazardEventId', '==', hazardEventId));
   } else {
     q = query(collection(db, SUPPLY_COLLECTION));
   }
 
-  return onSnapshot(q, (snapshot) => {
+  return onSnapshot(q, snapshot => {
     const supplies = snapshot.docs.map(mapSupplyDoc);
     callback(supplies);
   });
@@ -135,14 +136,18 @@ export function onSuppliesChanged(
  */
 export async function createSupply(
   data: CreateReliefSupplyData,
-  userId: string,
-  hazardEventId: string,
+  _userId: string,
+  hazardEventId: string
 ): Promise<string> {
+  const officerId = await requireDistrictOfficer();
+  validateSupply(data);
+  await requireActiveResourceEvent(hazardEventId, data.district);
   const docRef = await addDoc(collection(db, SUPPLY_COLLECTION), {
     ...data,
     remainingQuantity: data.totalQuantity,
+    availability: 'available',
     hazardEventId,
-    createdBy: userId,
+    createdBy: officerId,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -156,46 +161,65 @@ export async function createSupply(
  */
 export async function distributeSupply(
   data: CreateDistributionData,
-  userId: string,
-  hazardEventId: string,
+  _userId: string,
+  hazardEventId: string
 ): Promise<string> {
-  // 1. Fetch current supply document from Firestore
+  const officerId = await requireDistrictOfficer();
+  validateDistribution(data);
   const supplyDocRef = doc(db, SUPPLY_COLLECTION, data.supplyId);
-  const supplySnap = await getDoc(supplyDocRef);
-
-  if (!supplySnap.exists()) {
-    throw new Error('Supply item does not exist in inventory');
-  }
-
-  const supplyData = supplySnap.data();
-  const currentRemaining: number =
-    supplyData.remainingQuantity !== undefined
-      ? supplyData.remainingQuantity
-      : supplyData.totalQuantity;
-
-  // 2. Validate sufficient remaining quantity
-  if (data.quantity > currentRemaining) {
-    throw new Error(
-      `Insufficient supplies. Requested: ${data.quantity}, Available: ${currentRemaining}`,
+  const distDocRef = doc(collection(db, DIST_COLLECTION));
+  await runTransaction(db, async transaction => {
+    const supplySnap = await transaction.get(supplyDocRef);
+    if (!supplySnap.exists()) throw new Error('Supply item does not exist in inventory');
+    const supplyData = supplySnap.data();
+    if (supplyData.availability === 'withdrawn')
+      throw new Error('This supply has been withdrawn by its owner.');
+    const currentRemaining: number = supplyData.remainingQuantity ?? supplyData.totalQuantity;
+    if (!Number.isSafeInteger(currentRemaining) || currentRemaining < 0)
+      throw new Error(
+        'The inventory balance is invalid. Correct the stock record before distributing.'
+      );
+    if (data.quantity > currentRemaining)
+      throw new Error(
+        `Insufficient supplies. Requested: ${data.quantity}, Available: ${currentRemaining}`
+      );
+    await requireActiveResourceEvent(hazardEventId, supplyData.district, ref =>
+      transaction.get(ref)
     );
-  }
-
-  // 3. Create distribution record in Firestore
-  const distDocRef = await addDoc(collection(db, DIST_COLLECTION), {
-    ...data,
-    distributedBy: userId,
-    hazardEventId,
-    distributedAt: serverTimestamp(),
-  });
-
-  // 4. Decrement remaining quantity in Firestore
-  const newRemaining = currentRemaining - data.quantity;
-  await updateDoc(supplyDocRef, {
-    remainingQuantity: newRemaining,
-    updatedAt: serverTimestamp(),
+    await requireActiveResourceEvent(hazardEventId, data.destinationDistrict, ref =>
+      transaction.get(ref)
+    );
+    transaction.set(distDocRef, {
+      ...data,
+      supplyName: supplyData.itemName,
+      unit: supplyData.unit,
+      supplyType: supplyData.type || 'food',
+      organisationType: supplyData.organisationType || 'government',
+      organisationName: supplyData.organisationName || '',
+      distributedBy: officerId,
+      hazardEventId,
+      distributedAt: serverTimestamp(),
+    });
+    transaction.update(supplyDocRef, {
+      remainingQuantity: currentRemaining - data.quantity,
+      updatedAt: serverTimestamp(),
+    });
   });
 
   return distDocRef.id;
+}
+
+export async function setSupplyAvailability(
+  supplyId: string,
+  availability: 'available' | 'withdrawn'
+): Promise<void> {
+  await requireDistrictOfficer();
+  if (!['available', 'withdrawn'].includes(availability))
+    throw new Error('Invalid supply availability.');
+  await updateDoc(doc(db, SUPPLY_COLLECTION, supplyId), {
+    availability,
+    updatedAt: serverTimestamp(),
+  });
 }
 
 /**
@@ -204,15 +228,14 @@ export async function distributeSupply(
 export async function getDistributions(supplyId?: string): Promise<Distribution[]> {
   let q;
   if (supplyId) {
-    q = query(
-      collection(db, DIST_COLLECTION),
-      where('supplyId', '==', supplyId),
-    );
+    q = query(collection(db, DIST_COLLECTION), where('supplyId', '==', supplyId));
   } else {
     q = query(collection(db, DIST_COLLECTION));
   }
 
   const snapshot = await getDocs(q);
   const items = snapshot.docs.map(mapDistDoc);
-  return items.sort((a, b) => new Date(b.distributedAt).getTime() - new Date(a.distributedAt).getTime());
+  return items.sort(
+    (a, b) => new Date(b.distributedAt).getTime() - new Date(a.distributedAt).getTime()
+  );
 }

@@ -1,3 +1,16 @@
+import { auth } from '@/services/firebase';
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+beforeEach(() => {
+  Object.assign(auth, { currentUser: { uid: 'officer-uid-001' } });
+  installResourceFirestore({
+    'users/officer-uid-001': { role: 'dmc_officer' },
+    'hazardEvents/event-monsoon-2026': {
+      status: 'active',
+      hazardType: 'flood',
+      title: 'Fixture flood event',
+    },
+  });
+});
 /**
  * Unit Tests for UC01 Exception: No Recipients Matched.
  *
@@ -9,14 +22,8 @@
  * 5. Recalculates recipient count upon target area change.
  * 6. Allows dispatch when at least one valid recipient exists.
  */
-import {
-  createWarningDocument,
-  executeWarningDispatchPipeline,
-} from '@/services/warningService';
-import {
-  resolveDistrictsFromTargetAreas,
-  resolveRecipients,
-} from '@/services/recipientService';
+import { createWarningDocument, executeWarningDispatchPipeline } from '@/services/warningService';
+import { resolveDistrictsFromTargetAreas, resolveRecipients } from '@/services/recipientService';
 import type { CreateWarningPayload } from '@/types/warning';
 
 describe('UC01 Exception: No Recipients Matched', () => {
@@ -26,8 +33,8 @@ describe('UC01 Exception: No Recipients Matched', () => {
     hazardType: 'flood',
     severity: 'evacuation',
     targetMode: 'district',
-    targetAreas: ['EmptyDistrictName'],
-    resolvedDistricts: ['EmptyDistrictName'],
+    targetAreas: ['Colombo'],
+    resolvedDistricts: ['Colombo'],
     recipientCount: 0,
     headline: 'RED EVACUATION WARNING: Unpopulated Zone',
     instructions: 'Evacuate immediately if residing in the area.',
@@ -36,13 +43,13 @@ describe('UC01 Exception: No Recipients Matched', () => {
 
   it('should throw "No registered recipients found for the selected target area." in createWarningDocument when resolved recipients = 0', async () => {
     await expect(
-      createWarningDocument(basePayload, 'officer-uid-001', 'DMC Officer'),
+      createWarningDocument(basePayload, 'officer-uid-001', 'DMC Officer')
     ).rejects.toThrow('No registered recipients found for the selected target area.');
   });
 
   it('should throw "No registered recipients found for the selected target area." in executeWarningDispatchPipeline when resolved recipients = 0', async () => {
     await expect(
-      executeWarningDispatchPipeline(basePayload, 'officer-uid-001', 'DMC Officer'),
+      executeWarningDispatchPipeline(basePayload, 'officer-uid-001', 'DMC Officer')
     ).rejects.toThrow('No registered recipients found for the selected target area.');
   });
 

@@ -13,17 +13,20 @@ import {
   updateDoc,
   deleteDoc,
   serverTimestamp,
+  onSnapshot,
+  runTransaction,
+  arrayUnion,
   type DocumentData,
   type DocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { requireDmcActor } from './workflowAuthorization';
+import { normalizeWarning } from '@/utils/warningValidation';
 import {
-  executeDelivery,
   dispatchMultiChannelWarning,
   type MultiChannelDeliverySummary,
   type ChannelExecutionOptions,
 } from './deliveryService';
-import { attachWarningToTimeline } from './hazardEventService';
 import { resolveRecipients } from './recipientService';
 import type {
   HazardWarning,
@@ -38,6 +41,60 @@ import type {
 
 const COLLECTION = 'warnings';
 const DELIVERY_LOGS_COLLECTION = 'deliveryLogs';
+
+/** Read-only live feed of issued warnings for community accounts. */
+export function subscribeToActiveWarnings(
+  onWarnings: (warnings: HazardWarning[]) => void,
+  onError: (error: Error) => void
+) {
+  return onSnapshot(
+    query(
+      collection(db, COLLECTION),
+      where('status', 'in', ['active', 'delivered', 'partially_failed'])
+    ),
+    snapshot =>
+      onWarnings(
+        snapshot.docs
+          .map(mapWarningDoc)
+          .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      ),
+    onError
+  );
+}
+
+function dateIso(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  return (value as { toDate?: () => Date } | null)?.toDate?.()?.toISOString();
+}
+
+async function persistWarning(data: DocumentData, payload: CreateWarningPayload) {
+  const ref = doc(collection(db, COLLECTION));
+  await runTransaction(db, async transaction => {
+    const event = await transaction.get(doc(db, 'hazardEvents', payload.eventId));
+    if (!event.exists() || event.data().status !== 'active')
+      throw new Error('Select an active hazard event.');
+    if (event.data().hazardType !== payload.hazardType)
+      throw new Error('Hazard type must match the selected event.');
+    if (payload.previousWarningId) {
+      const previous = await transaction.get(doc(db, COLLECTION, payload.previousWarningId));
+      if (
+        !previous.exists() ||
+        (previous.data().eventId || previous.data().hazardEventId) !== payload.eventId
+      )
+        throw new Error('The previous warning must belong to the same hazard event.');
+      if (!['active', 'delivered', 'partially_failed'].includes(previous.data().status))
+        throw new Error('Only issued warnings can be followed up.');
+      const levels = ['advisory', 'warning', 'evacuation'];
+      if (levels.indexOf(payload.severity) < levels.indexOf(previous.data().severity))
+        throw new Error('A follow-up warning cannot lower the previous severity.');
+    }
+    transaction.set(ref, {
+      ...data,
+      hazardEventTitle: event.data().title || data.hazardEventTitle,
+    });
+  });
+  return ref;
+}
 
 function mapWarningDoc(docSnap: DocumentSnapshot<DocumentData>): HazardWarning {
   const d = docSnap.data() || {};
@@ -68,9 +125,9 @@ function mapWarningDoc(docSnap: DocumentSnapshot<DocumentData>): HazardWarning {
     issuedBy,
     issuedByUid: issuedBy,
     issuedByName: d.issuedByName || 'DMC Duty Officer',
-    createdAt: d.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-    dispatchedAt: d.dispatchedAt?.toDate?.()?.toISOString(),
-    updatedAt: d.updatedAt?.toDate?.()?.toISOString(),
+    createdAt: dateIso(d.createdAt) || new Date().toISOString(),
+    dispatchedAt: dateIso(d.dispatchedAt),
+    updatedAt: dateIso(d.updatedAt),
   };
 }
 
@@ -95,17 +152,20 @@ export async function getWarningById(warningId: string): Promise<HazardWarning |
 /**
  * Fetch all active disaster warnings from Cloud Firestore.
  */
-export async function getActiveWarnings(): Promise<HazardWarning[]> {
+export async function getActiveWarnings(options?: {
+  throwOnError?: boolean;
+}): Promise<HazardWarning[]> {
   try {
     const q = query(
       collection(db, COLLECTION),
-      where('status', 'in', ['active', 'delivered', 'partially_failed']),
+      where('status', 'in', ['active', 'delivered', 'partially_failed'])
     );
     const snapshot = await getDocs(q);
     const items = snapshot.docs.map(mapWarningDoc);
     return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
     console.warn('Notice fetching active warnings:', error);
+    if (options?.throwOnError) throw error;
     return [];
   }
 }
@@ -131,10 +191,7 @@ export async function getAllWarnings(): Promise<HazardWarning[]> {
 export async function getWarningsForEvent(eventId: string): Promise<HazardWarning[]> {
   if (!eventId) return [];
   try {
-    const q = query(
-      collection(db, COLLECTION),
-      where('eventId', '==', eventId),
-    );
+    const q = query(collection(db, COLLECTION), where('eventId', '==', eventId));
     const snapshot = await getDocs(q);
     const items = snapshot.docs.map(mapWarningDoc);
     return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -149,12 +206,9 @@ export async function getWarningsForEvent(eventId: string): Promise<HazardWarnin
  */
 export async function getDeliveryLogsForWarning(warningId: string): Promise<DeliveryLog[]> {
   try {
-    const q = query(
-      collection(db, DELIVERY_LOGS_COLLECTION),
-      where('warningId', '==', warningId),
-    );
+    const q = query(collection(db, DELIVERY_LOGS_COLLECTION), where('warningId', '==', warningId));
     const snap = await getDocs(q);
-    return snap.docs.map((docSnap) => {
+    return snap.docs.map(docSnap => {
       const d = docSnap.data();
       return {
         logId: docSnap.id,
@@ -165,7 +219,7 @@ export async function getDeliveryLogsForWarning(warningId: string): Promise<Deli
         failedCount: d.failedCount || 0,
         status: d.status || 'success',
         errorMessage: d.errorMessage,
-        timestamp: d.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(),
+        timestamp: dateIso(d.timestamp) || new Date().toISOString(),
       };
     });
   } catch (error) {
@@ -180,7 +234,7 @@ export async function getDeliveryLogsForWarning(warningId: string): Promise<Deli
  */
 export async function saveDeliveryLogs(
   warningId: string,
-  channelResults: ChannelResult[],
+  channelResults: ChannelResult[]
 ): Promise<DeliveryLog[]> {
   const savedLogs: DeliveryLog[] = [];
 
@@ -222,20 +276,20 @@ export async function saveDeliveryLogs(
  * Fetch verified ground reports for a specific hazard event (UC01 Step 2).
  */
 export async function getGroundReportsForEvent(
-  hazardEventId: string,
+  hazardEventId: string
 ): Promise<VerifiedGroundReportStub[]> {
   if (!hazardEventId) return [];
   try {
     const q = query(
       collection(db, 'groundReports'),
       where('hazardEventId', '==', hazardEventId),
-      where('status', '==', 'verified'),
+      where('status', '==', 'verified')
     );
     const snap = await getDocs(q);
     if (snap.empty) {
       return [];
     }
-    return snap.docs.map((d) => {
+    return snap.docs.map(d => {
       const data = d.data();
       return {
         id: d.id,
@@ -251,9 +305,7 @@ export async function getGroundReportsForEvent(
             : 'medium',
         verifiedBy: data.verifiedByName || data.verifiedBy || 'DMC Duty Officer',
         reportedAt:
-          data.captureTime ||
-          data.createdAt?.toDate?.()?.toISOString() ||
-          new Date().toISOString(),
+          data.captureTime || data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
       };
     });
   } catch (error) {
@@ -275,28 +327,11 @@ export async function getGroundReportsForEvent(
 export async function createWarningDocument(
   payload: CreateWarningPayload,
   issuedByUid: string,
-  issuedByName?: string,
+  issuedByName?: string
 ): Promise<{ warningId: string; status: WarningStatus; recipientCount: number; headline: string }> {
-  // 1. Validate required information
-  if (!payload.severity) {
-    throw new Error('Emergency severity level is mandatory.');
-  }
-  if (!payload.targetMode) {
-    throw new Error('Target mode is mandatory.');
-  }
-  if (!payload.targetAreas || payload.targetAreas.length === 0) {
-    throw new Error('At least one target area must be selected.');
-  }
-  if (!payload.headline || !payload.headline.trim()) {
-    throw new Error('Warning headline is mandatory.');
-  }
-  if (!payload.instructions || !payload.instructions.trim()) {
-    throw new Error('Emergency instruction text is mandatory.');
-  }
-  const selectedChannels = payload.channels || payload.deliveryChannels || [];
-  if (selectedChannels.length === 0) {
-    throw new Error('At least one delivery channel (Push, SMS, or Audible) must be selected.');
-  }
+  payload = normalizeWarning(payload);
+  await requireDmcActor(issuedByUid);
+  const selectedChannels = payload.channels;
 
   // 2. Resolve recipients again on backend/service layer before dispatch
   const resolution = await resolveRecipients(payload.targetMode, payload.targetAreas);
@@ -334,7 +369,7 @@ export async function createWarningDocument(
     updatedAt: serverTimestamp(),
   };
 
-  const docRef = await addDoc(collection(db, COLLECTION), warningDocData);
+  const docRef = await persistWarning(warningDocData, payload);
 
   // 6. Return created warning ID
   return {
@@ -375,28 +410,11 @@ export async function executeWarningDispatchPipeline(
   payload: CreateWarningPayload,
   issuedByUid: string,
   issuedByName: string,
-  channelOptions?: Partial<Record<DeliveryChannel, ChannelExecutionOptions>>,
+  channelOptions?: Partial<Record<DeliveryChannel, ChannelExecutionOptions>>
 ): Promise<WarningDispatchPipelineResult> {
-  // 1. Validate
-  if (!payload.severity) {
-    throw new Error('Emergency severity level is mandatory.');
-  }
-  if (!payload.targetMode) {
-    throw new Error('Target mode is mandatory.');
-  }
-  if (!payload.targetAreas || payload.targetAreas.length === 0) {
-    throw new Error('At least one target area must be selected.');
-  }
-  if (!payload.headline || !payload.headline.trim()) {
-    throw new Error('Warning headline is mandatory.');
-  }
-  if (!payload.instructions || !payload.instructions.trim()) {
-    throw new Error('Emergency instruction text is mandatory.');
-  }
-  const selectedChannels = payload.channels || payload.deliveryChannels || [];
-  if (selectedChannels.length === 0) {
-    throw new Error('At least one delivery channel (Push, SMS, or Audible) must be selected.');
-  }
+  payload = normalizeWarning(payload);
+  await requireDmcActor(issuedByUid);
+  const selectedChannels = payload.channels;
 
   // 2. Resolve recipients again on service layer before dispatch
   const resolution = await resolveRecipients(payload.targetMode, payload.targetAreas);
@@ -411,29 +429,32 @@ export async function executeWarningDispatchPipeline(
   const eventId = payload.eventId || payload.hazardEventId || '';
 
   // 4 & 5. Create warning document with status "dispatching"
-  const docRef = await addDoc(collection(db, COLLECTION), {
-    eventId,
-    hazardEventId: eventId,
-    hazardEventTitle: payload.hazardEventTitle || '',
-    hazardType: payload.hazardType,
-    severity: payload.severity,
-    targetMode: payload.targetMode,
-    targetAreas: payload.targetAreas,
-    resolvedDistricts: resolution.contributingDistricts || payload.resolvedDistricts || [],
-    recipientCount,
-    headline: payload.headline.trim(),
-    instructions: payload.instructions.trim(),
-    channels: selectedChannels,
-    deliveryChannels: selectedChannels,
-    previousWarningId: payload.previousWarningId || null,
-    status: 'dispatching' as WarningStatus,
-    issuedBy: issuedByUid,
-    issuedByUid,
-    issuedByName,
-    createdAt: serverTimestamp(),
-    dispatchedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
+  const docRef = await persistWarning(
+    {
+      eventId,
+      hazardEventId: eventId,
+      hazardEventTitle: payload.hazardEventTitle || '',
+      hazardType: payload.hazardType,
+      severity: payload.severity,
+      targetMode: payload.targetMode,
+      targetAreas: payload.targetAreas,
+      resolvedDistricts: resolution.contributingDistricts || payload.resolvedDistricts || [],
+      recipientCount,
+      headline: payload.headline.trim(),
+      instructions: payload.instructions.trim(),
+      channels: selectedChannels,
+      deliveryChannels: selectedChannels,
+      previousWarningId: payload.previousWarningId || null,
+      status: 'dispatching' as WarningStatus,
+      issuedBy: issuedByUid,
+      issuedByUid,
+      issuedByName,
+      createdAt: serverTimestamp(),
+      dispatchedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+    payload
+  );
 
   const warningId = docRef.id;
 
@@ -442,43 +463,66 @@ export async function executeWarningDispatchPipeline(
     payload,
     recipients,
     selectedChannels,
-    channelOptions,
+    channelOptions
   );
 
-  // 8. Save per-channel delivery logs to Cloud Firestore `deliveryLogs` collection
-  const deliveryLogs = await saveDeliveryLogs(warningId, summary.channelResults);
-
-  // 9. Calculate final warning status:
-  // - All succeed -> 'delivered'
-  // - At least 1 succeeds & 1 fails -> 'partially_failed'
-  // - ALL fail -> 'failed'
-  let finalStatus: WarningStatus = 'delivered';
-  if (summary.overallStatus === 'Failed') {
-    finalStatus = 'failed';
-  } else if (summary.overallStatus === 'Partial') {
-    finalStatus = 'partially_failed';
-  } else {
-    finalStatus = 'delivered';
-  }
-
-  // 10. Update warning document in Cloud Firestore
-  await updateDoc(doc(db, COLLECTION, warningId), {
-    status: finalStatus,
-    channelResults: summary.channelResults,
-    dispatchedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-
-  // 11. Attach warning to hazard event timeline
-  if (eventId) {
-    attachWarningToTimeline(
-      eventId,
-      warningId,
-      payload.headline.trim(),
-      payload.severity,
-      issuedByName || issuedByUid,
-    ).catch((err) =>
-      console.warn('Notice attaching warning to timeline:', err),
+  const finalStatus: WarningStatus =
+    summary.overallStatus === 'Failed'
+      ? 'failed'
+      : summary.overallStatus === 'Partial'
+        ? 'partially_failed'
+        : 'delivered';
+  const timestamp = new Date().toISOString();
+  const deliveryLogs: DeliveryLog[] = summary.channelResults.map(result => ({
+    logId: warningId + '-' + result.channel,
+    warningId,
+    ...result,
+    timestamp,
+  }));
+  const timelineEntry = {
+    id: 'timeline-warn-' + warningId,
+    eventId,
+    warningId,
+    eventType: 'WARNING_ISSUED',
+    type: 'WARNING_ISSUED',
+    severity: payload.severity,
+    headline: payload.headline,
+    summary: payload.headline,
+    issuedBy: issuedByName || issuedByUid,
+    timestamp,
+  };
+  try {
+    // Persist the final outcome, channel audit and timeline together before returning success.
+    await runTransaction(db, async transaction => {
+      const eventRef = doc(db, 'hazardEvents', eventId);
+      const event = await transaction.get(eventRef);
+      if (!event.exists()) throw new Error('Hazard event not found.');
+      for (const log of deliveryLogs)
+        transaction.set(doc(db, DELIVERY_LOGS_COLLECTION, log.logId), {
+          ...log,
+          errorMessage: log.errorMessage || null,
+          timestamp: serverTimestamp(),
+        });
+      transaction.update(docRef, {
+        status: finalStatus,
+        channelResults: summary.channelResults,
+        dispatchedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      transaction.update(eventRef, {
+        timeline: arrayUnion(timelineEntry),
+        updatedAt: serverTimestamp(),
+      });
+      transaction.set(
+        doc(db, 'hazardEvents/' + eventId + '/timeline', timelineEntry.id),
+        timelineEntry
+      );
+    });
+  } catch {
+    throw new Error(
+      'Delivery was attempted for warning ' +
+        warningId +
+        ', but its audit could not be saved. Do not resend; check the warning record before retrying.'
     );
   }
 
@@ -506,109 +550,26 @@ export async function createWarningWithDispatch(
   payload: CreateWarningPayload,
   issuedByUid: string,
   issuedByName: string,
-  forceChannelFailure?: DeliveryChannel,
-): Promise<{ warningId: string; overallStatus: WarningStatus; channelResults: ChannelDeliveryResult[] }> {
-  // Step 14: Validation
-  if (!payload.headline.trim()) {
-    throw new Error('Warning headline is mandatory.');
-  }
-  if (!payload.instructions.trim()) {
-    throw new Error('Emergency instructions are mandatory.');
-  }
-  const selectedChannels = payload.channels || payload.deliveryChannels || [];
-  if (selectedChannels.length === 0) {
-    throw new Error('At least one delivery channel (Push, SMS, or Audible) must be selected.');
-  }
-  if (payload.recipientCount <= 0) {
-    throw new Error('No registered recipients found for the selected target area.');
-  }
-
-  const eventId = payload.eventId || payload.hazardEventId || '';
-
-  // Step 15: Create warning document in Firestore `warnings` with status "dispatching"
-  const docRef = await addDoc(collection(db, COLLECTION), {
-    eventId,
-    hazardEventId: eventId,
-    hazardEventTitle: payload.hazardEventTitle,
-    hazardType: payload.hazardType,
-    severity: payload.severity,
-    targetMode: payload.targetMode,
-    targetAreas: payload.targetAreas,
-    resolvedDistricts: payload.resolvedDistricts,
-    recipientCount: payload.recipientCount,
-    headline: payload.headline.trim(),
-    instructions: payload.instructions.trim(),
-    channels: selectedChannels,
-    deliveryChannels: selectedChannels,
-    status: 'dispatching' as WarningStatus,
-    issuedBy: issuedByUid,
-    issuedByUid,
-    issuedByName,
-    createdAt: serverTimestamp(),
-    dispatchedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-
-  const warningId = docRef.id;
-
-  // Step 16: Initiate delivery execution
-  const deliveryResult = await executeDelivery(
-    selectedChannels,
-    payload.recipientCount,
-    forceChannelFailure,
-  );
-
-  // Step 17: Write individual delivery logs to `deliveryLogs` collection
-  for (const chResult of deliveryResult.channelResults) {
-    try {
-      await addDoc(collection(db, DELIVERY_LOGS_COLLECTION), {
-        warningId,
-        channel: chResult.channel,
-        recipientCount: chResult.recipientCount,
-        deliveredCount: chResult.status === 'success' ? chResult.recipientCount : 0,
-        failedCount: chResult.status === 'failed' ? chResult.recipientCount : 0,
-        status: chResult.status,
-        errorMessage: chResult.errorMessage || null,
-        timestamp: serverTimestamp(),
-      });
-    } catch (err) {
-      console.warn('Notice writing delivery log:', err);
-    }
-  }
-
-  // Step 18: Update warning document status in Cloud Firestore
-  await updateDoc(doc(db, COLLECTION, warningId), {
-    status: deliveryResult.overallStatus,
-    channelResults: deliveryResult.channelResults,
-    dispatchedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-
-  // Step 20: Attach warning to hazard event timeline
-  if (eventId) {
-    await attachWarningToTimeline(
-      eventId,
-      warningId,
-      payload.headline.trim(),
-      payload.severity,
-      issuedByName || issuedByUid,
-    );
-  }
-
+  forceChannelFailure?: DeliveryChannel
+): Promise<{
+  warningId: string;
+  overallStatus: WarningStatus;
+  channelResults: ChannelDeliveryResult[];
+}> {
+  const options: Partial<Record<DeliveryChannel, ChannelExecutionOptions>> = {};
+  if (forceChannelFailure) options[forceChannelFailure] = { mockFailure: true };
+  const result = await executeWarningDispatchPipeline(payload, issuedByUid, issuedByName, options);
   return {
-    warningId,
-    overallStatus: deliveryResult.overallStatus,
-    channelResults: deliveryResult.channelResults,
+    warningId: result.warningId,
+    overallStatus: result.finalStatus,
+    channelResults: result.channelResults,
   };
 }
 
 /**
  * Update warning status directly (e.g. Cancel alert).
  */
-export async function updateWarningStatus(
-  id: string,
-  status: WarningStatus,
-): Promise<void> {
+export async function updateWarningStatus(id: string, status: WarningStatus): Promise<void> {
   const docRef = doc(db, COLLECTION, id);
   await updateDoc(docRef, {
     status,

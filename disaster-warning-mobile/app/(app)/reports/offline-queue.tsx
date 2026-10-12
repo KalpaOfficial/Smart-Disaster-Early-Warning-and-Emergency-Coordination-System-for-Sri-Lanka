@@ -1,3 +1,4 @@
+import { AppAlert } from '@/utils/appNotice';
 /**
  * Offline Queue Screen — Local Storage Sync Manager.
  * UC02 Alternate Flow: Offline Capture and Delayed Synchronisation.
@@ -15,7 +16,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
@@ -23,8 +23,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { ScreenContainer } from '@/components/ScreenContainer';
 import { ObservationTypeBadge } from '@/components/ObservationTypeBadge';
+import { ReportScreenHero } from '@/components/ReportScreenHero';
 import { EmptyState } from '@/components/EmptyState';
-import { Colors, BorderRadius, Spacing, FontSize } from '@/constants/colors';
+import { LightColors, MobileTypography, BorderRadius, Spacing } from '@/constants/colors';
 import {
   getQueuedReports,
   syncSingleQueuedReport,
@@ -71,9 +72,9 @@ export default function OfflineQueueScreen() {
   const handleSyncAll = async () => {
     if (queue.length === 0) return;
     if (!isOnline) {
-      Alert.alert(
+      AppAlert.alert(
         'No Internet Connection',
-        'Device is currently offline. Reconnect to Wi-Fi or cellular network to upload queued reports.',
+        'Device is currently offline. Reconnect to Wi-Fi or cellular network to upload queued reports.'
       );
       return;
     }
@@ -84,7 +85,7 @@ export default function OfflineQueueScreen() {
       await loadQueue();
 
       if (summary.failedCount === 0) {
-        Alert.alert(
+        AppAlert.alert(
           'Synchronization Complete',
           `Successfully uploaded and synchronized ${summary.syncedCount} report${summary.syncedCount !== 1 ? 's' : ''}.`,
           [
@@ -93,16 +94,16 @@ export default function OfflineQueueScreen() {
               onPress: () => router.replace('/(app)/reports' as never),
             },
             { text: 'OK' },
-          ],
+          ]
         );
       } else {
-        Alert.alert(
+        AppAlert.alert(
           'Partial Synchronization',
-          `${summary.syncedCount} succeeded, ${summary.failedCount} failed to upload. Unsynced reports remain safely stored in the queue for retry.`,
+          `${summary.syncedCount} succeeded, ${summary.failedCount} failed to upload. Unsynced reports remain safely stored in the queue for retry.`
         );
       }
     } catch (err) {
-      Alert.alert('Sync Error', (err as Error)?.message || 'Failed to sync queued reports.');
+      AppAlert.alert('Sync Error', (err as Error)?.message || 'Failed to sync queued reports.');
     } finally {
       setSyncingAll(false);
     }
@@ -111,7 +112,10 @@ export default function OfflineQueueScreen() {
   // Sync a single queued item
   const handleSyncSingle = async (item: OfflineReportQueueItem) => {
     if (!isOnline) {
-      Alert.alert('Device Offline', 'Please connect to the internet before retrying this report upload.');
+      AppAlert.alert(
+        'Device Offline',
+        'Please connect to the internet before retrying this report upload.'
+      );
       return;
     }
 
@@ -121,18 +125,18 @@ export default function OfflineQueueScreen() {
       await loadQueue();
 
       if (res.success) {
-        Alert.alert(
+        AppAlert.alert(
           'Report Synced',
-          `Reference ID ${res.referenceNumber || 'Generated'} was assigned and sent to verification.`,
+          `Reference ID ${res.referenceNumber || 'Generated'} was assigned and sent to verification.`
         );
       } else {
-        Alert.alert(
+        AppAlert.alert(
           'Sync Failed',
-          res.error || 'Failed to upload report. The report has been preserved in the queue.',
+          res.error || 'Failed to upload report. The report has been preserved in the queue.'
         );
       }
     } catch (err) {
-      Alert.alert('Sync Error', (err as Error)?.message || 'Could not sync report.');
+      AppAlert.alert('Sync Error', (err as Error)?.message || 'Could not sync report.');
     } finally {
       setSyncingItemId(null);
     }
@@ -140,7 +144,7 @@ export default function OfflineQueueScreen() {
 
   // Remove single item with confirmation
   const handleRemoveItem = (queueId: string) => {
-    Alert.alert(
+    AppAlert.alert(
       'Discard Report?',
       'Are you sure you want to delete this unsent report? This cannot be undone.',
       [
@@ -153,13 +157,13 @@ export default function OfflineQueueScreen() {
             await loadQueue();
           },
         },
-      ],
+      ]
     );
   };
 
   // Clear all items with confirmation
   const handleClearAll = () => {
-    Alert.alert(
+    AppAlert.alert(
       'Clear Offline Queue',
       'Discard all pending offline reports? Any unsent hazard observations will be permanently removed.',
       [
@@ -172,7 +176,7 @@ export default function OfflineQueueScreen() {
             await loadQueue();
           },
         },
-      ],
+      ]
     );
   };
 
@@ -191,16 +195,20 @@ export default function OfflineQueueScreen() {
       <View style={styles.card}>
         {/* Card Header */}
         <View style={styles.cardHeader}>
-          <ObservationTypeBadge type={item.reportData.observationType} size="sm" />
+          <ObservationTypeBadge
+            appearance="light"
+            type={item.reportData.observationType}
+            size="sm"
+          />
           <View style={styles.headerRightWrap}>
             {item.syncAttempts > 0 ? (
               <View style={styles.attemptBadge}>
-                <Ionicons name="warning-outline" size={12} color={Colors.report.pending} />
+                <Ionicons name="warning-outline" size={12} color={'#946000'} />
                 <Text style={styles.attemptBadgeText}>{item.syncAttempts} attempt(s)</Text>
               </View>
             ) : (
               <View style={styles.queuedBadge}>
-                <Ionicons name="cloud-offline-outline" size={12} color={Colors.text.muted} />
+                <Ionicons name="cloud-offline-outline" size={12} color={LightColors.mutedText} />
                 <Text style={styles.queuedBadgeText}>Queued</Text>
               </View>
             )}
@@ -218,19 +226,20 @@ export default function OfflineQueueScreen() {
             />
           ) : (
             <View style={[styles.thumbnail, styles.noThumbWrap]}>
-              <Ionicons name="image-outline" size={24} color={Colors.text.muted} />
+              <Ionicons name="image-outline" size={24} color={LightColors.mutedText} />
             </View>
           )}
 
           <View style={styles.cardInfo}>
             <View style={styles.locationRow}>
-              <Ionicons name="location-sharp" size={14} color={Colors.accent.primary} />
-              <Text style={styles.locationText} numberOfLines={1}>
+              <Ionicons name="location-sharp" size={14} color={LightColors.primary} />
+              <Text style={styles.locationText} numberOfLines={2}>
                 {item.reportData.locationName}
               </Text>
             </View>
             <Text style={styles.districtText}>
-              {item.reportData.district} District • {item.reportData.isManualLocation ? 'Manual' : 'GPS'}
+              {item.reportData.district} District •{' '}
+              {item.reportData.isManualLocation ? 'Manual' : 'GPS'}
             </Text>
             <Text style={styles.descriptionSnippet} numberOfLines={2}>
               {item.reportData.description}
@@ -241,7 +250,7 @@ export default function OfflineQueueScreen() {
         {/* Sync Failure Error Message (if any) */}
         {item.lastSyncError ? (
           <View style={styles.errorAlertBox}>
-            <Ionicons name="alert-circle" size={14} color={Colors.status.danger} />
+            <Ionicons name="alert-circle" size={14} color={LightColors.danger} />
             <Text style={styles.errorAlertText} numberOfLines={2}>
               Last Error: {item.lastSyncError}
             </Text>
@@ -257,15 +266,20 @@ export default function OfflineQueueScreen() {
 
           <View style={styles.cardActionButtons}>
             <TouchableOpacity
+              accessibilityRole="button"
               style={styles.discardButton}
               onPress={() => handleRemoveItem(item.queueId)}
               accessibilityLabel="Discard report"
             >
-              <Ionicons name="trash-outline" size={16} color={Colors.status.danger} />
+              <Ionicons name="trash-outline" size={16} color={LightColors.danger} />
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.syncItemButton, (!isOnline || isThisItemSyncing) && styles.btnDisabled]}
+              accessibilityRole="button"
+              style={[
+                styles.syncItemButton,
+                (!isOnline || isThisItemSyncing) && styles.btnDisabled,
+              ]}
               onPress={() => handleSyncSingle(item)}
               disabled={!isOnline || isThisItemSyncing}
             >
@@ -274,7 +288,7 @@ export default function OfflineQueueScreen() {
               ) : (
                 <>
                   <Ionicons name="cloud-upload-outline" size={14} color="#FFF" />
-                  <Text style={styles.syncItemButtonText}>Sync</Text>
+                  <Text style={styles.syncItemButtonText}>Send</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -285,97 +299,97 @@ export default function OfflineQueueScreen() {
   };
 
   return (
-    <ScreenContainer>
-      {/* Top Header Bar */}
-      <View style={styles.headerBar}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={Colors.text.primary} />
-        </TouchableOpacity>
-        <View style={styles.headerTitleWrap}>
-          <Text style={styles.headerBarTitle}>Offline Queue</Text>
-          <Text style={styles.headerBarSubtitle}>
-            {queue.length} pending report{queue.length !== 1 ? 's' : ''} stored locally
-          </Text>
-        </View>
-        {queue.length > 0 ? (
-          <TouchableOpacity
-            style={styles.clearAllBtn}
-            onPress={handleClearAll}
-            accessibilityLabel="Clear all offline queue"
-          >
-            <Ionicons name="trash-bin-outline" size={20} color={Colors.text.muted} />
-          </TouchableOpacity>
-        ) : (
-          <View style={{ width: 40 }} />
-        )}
-      </View>
-
-      {/* Network Connectivity Status Banner */}
-      <View
-        style={[
-          styles.networkBanner,
-          isOnline ? styles.networkBannerOnline : styles.networkBannerOffline,
-        ]}
-      >
-        <Ionicons
-          name={isOnline ? 'wifi' : 'cloud-offline'}
-          size={16}
-          color={isOnline ? Colors.status.success : Colors.report.pending}
-        />
-        <Text
-          style={[
-            styles.networkBannerText,
-            { color: isOnline ? Colors.status.success : Colors.report.pending },
-          ]}
-        >
-          {isOnline
-            ? 'Connected to network — Ready to synchronize'
-            : 'Device is offline — Observations stored safely on device'}
-        </Text>
-      </View>
-
-      {/* Sync All Action Dock (when reports exist) */}
-      {queue.length > 0 && (
-        <View style={styles.syncBar}>
-          <TouchableOpacity
-            style={[
-              styles.syncAllButton,
-              (!isOnline || syncingAll) && styles.btnDisabled,
-            ]}
-            onPress={handleSyncAll}
-            disabled={!isOnline || syncingAll}
-          >
-            {syncingAll ? (
-              <>
-                <ActivityIndicator size="small" color="#FFF" />
-                <Text style={styles.syncAllButtonText}>Synchronizing All Reports...</Text>
-              </>
-            ) : (
-              <>
-                <Ionicons name="cloud-upload" size={18} color="#FFF" />
-                <Text style={styles.syncAllButtonText}>
-                  {isOnline ? `Sync All Now (${queue.length})` : 'Waiting for Internet...'}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* List or Empty State */}
+    <ScreenContainer style={styles.screen} contentStyle={styles.shell}>
+      {/* The hero and cards share one scrolling list, matching the shelter directory. */}
       {loading ? (
         <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={Colors.accent.primary} />
+          <ActivityIndicator size="large" color={LightColors.primary} />
           <Text style={styles.loadingText}>Checking offline storage...</Text>
         </View>
       ) : (
         <FlatList
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <View>
+              <ReportScreenHero
+                title="Saved reports"
+                caption="Community reports"
+                description="Keep track of reports saved on your device and send them when you’re back online."
+                icon="cloud-upload-outline"
+                onBack={() => router.back()}
+                action={
+                  queue.length
+                    ? {
+                        label: 'Clear all offline queue',
+                        icon: 'trash-bin-outline',
+                        onPress: handleClearAll,
+                      }
+                    : undefined
+                }
+              />
+              <View style={styles.statusPanel}>
+                <Text style={styles.panelTitle}>
+                  {queue.length} {queue.length === 1 ? 'report' : 'reports'} waiting to upload
+                </Text>
+                {/* Network Connectivity Status Banner */}
+                <View
+                  style={[
+                    styles.networkBanner,
+                    isOnline ? styles.networkBannerOnline : styles.networkBannerOffline,
+                  ]}
+                >
+                  <Ionicons
+                    name={isOnline ? 'wifi' : 'cloud-offline'}
+                    size={16}
+                    color={isOnline ? '#07834B' : '#946000'}
+                  />
+                  <Text
+                    style={[styles.networkBannerText, { color: isOnline ? '#07834B' : '#946000' }]}
+                  >
+                    {isOnline
+                      ? 'You’re online. Saved reports are ready to send.'
+                      : 'You’re offline. Your reports are saved on this device.'}
+                  </Text>
+                </View>
+              </View>
+              {/* Sync All Action Dock (when reports exist) */}
+              {queue.length > 0 && (
+                <View style={styles.syncBar}>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    style={[styles.syncAllButton, (!isOnline || syncingAll) && styles.btnDisabled]}
+                    onPress={handleSyncAll}
+                    disabled={!isOnline || syncingAll}
+                  >
+                    {syncingAll ? (
+                      <>
+                        <ActivityIndicator size="small" color="#FFF" />
+                        <Text style={styles.syncAllButtonText}>Sending saved reports...</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Ionicons name="cloud-upload" size={18} color="#FFF" />
+                        <Text style={styles.syncAllButtonText}>
+                          {isOnline
+                            ? `Send all reports (${queue.length})`
+                            : 'Connect to send reports'}
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {queue.length > 0 && (
+                <View style={styles.listHeading}>
+                  <Text style={styles.directoryTitle}>Reports on this device</Text>
+                  <Text style={styles.directoryCount}>{queue.length} saved</Text>
+                </View>
+              )}
+            </View>
+          }
           data={queue}
-          keyExtractor={(item) => item.queueId}
+          keyExtractor={item => item.queueId}
           renderItem={renderQueueItem}
           contentContainerStyle={[
             styles.listContent,
@@ -385,16 +399,17 @@ export default function OfflineQueueScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={Colors.accent.primary}
-              colors={[Colors.accent.primary]}
+              tintColor={LightColors.primary}
+              colors={[LightColors.primary]}
             />
           }
           ListEmptyComponent={
             <EmptyState
+              appearance="light"
               iconName="cloud-done-outline"
-              title="All Reports Synchronized"
-              message="No ground hazard reports are waiting in local offline storage. When you report offline, records will queue here automatically."
-              actionTitle="Return to Reports"
+              title="You’re all caught up"
+              message="No reports are waiting to upload. Reports you save offline will appear here until you reconnect."
+              actionTitle="Back to my reports"
               onAction={() => router.replace('/(app)/reports' as never)}
             />
           }
@@ -405,6 +420,49 @@ export default function OfflineQueueScreen() {
 }
 
 const styles = StyleSheet.create({
+  statusPanel: {
+    marginHorizontal: 18,
+    marginTop: -24,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    padding: 14,
+    borderWidth: 1,
+    borderColor: LightColors.border,
+    shadowColor: '#154893',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
+    elevation: 2,
+    marginBottom: 18,
+  },
+  panelTitle: {
+    ...MobileTypography.label,
+    color: LightColors.text,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  listHeading: {
+    marginHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 16,
+    marginBottom: 12,
+  },
+  directoryTitle: {
+    ...MobileTypography.section,
+    flexShrink: 1,
+    fontWeight: '700',
+    color: LightColors.text,
+  },
+  directoryCount: { ...MobileTypography.caption, color: LightColors.secondaryText },
+  screen: { backgroundColor: '#0855D9' },
+  shell: {
+    backgroundColor: LightColors.background,
+    borderColor: LightColors.border,
+    shadowOpacity: 0,
+  },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -413,23 +471,27 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: Spacing.md,
-    fontSize: FontSize.md,
-    color: Colors.text.secondary,
+    ...MobileTypography.body,
+    color: LightColors.secondaryText,
   },
   headerBar: {
+    backgroundColor: LightColors.primary,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    minHeight: 96,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border.default,
+    borderBottomColor: LightColors.border,
   },
   backButton: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: BorderRadius.full,
-    backgroundColor: Colors.bg.secondary,
+    backgroundColor: 'rgba(255,255,255,0.16)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -439,23 +501,27 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.sm,
   },
   headerBarTitle: {
-    fontSize: FontSize.lg,
+    ...MobileTypography.section,
     fontWeight: '700',
-    color: Colors.text.primary,
+    color: '#FFFFFF',
   },
   headerBarSubtitle: {
-    fontSize: FontSize.xs,
-    color: Colors.text.muted,
+    ...MobileTypography.caption,
+    color: '#E0ECFF',
+    textAlign: 'center',
   },
   clearAllBtn: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: BorderRadius.full,
-    backgroundColor: Colors.bg.secondary,
+    backgroundColor: 'rgba(255,255,255,0.16)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   networkBanner: {
+    marginHorizontal: 0,
+    marginTop: 0,
+    borderRadius: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -472,19 +538,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(245, 158, 11, 0.12)',
     borderBottomColor: 'rgba(245, 158, 11, 0.25)',
   },
-  networkBannerText: {
-    fontSize: FontSize.xs,
-    fontWeight: '600',
-  },
+  networkBannerText: { flex: 1, ...MobileTypography.caption, fontWeight: '600' },
   syncBar: {
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: 18,
     paddingVertical: Spacing.md,
-    backgroundColor: Colors.bg.secondary,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border.default,
+    backgroundColor: LightColors.background,
+    borderBottomWidth: 0,
+    borderBottomColor: LightColors.border,
   },
   syncAllButton: {
-    backgroundColor: Colors.accent.primary,
+    minHeight: 50,
+    backgroundColor: LightColors.primary,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -494,29 +558,30 @@ const styles = StyleSheet.create({
   },
   syncAllButtonText: {
     color: '#FFF',
-    fontSize: FontSize.md,
+    ...MobileTypography.body,
     fontWeight: '700',
   },
   btnDisabled: {
     opacity: 0.6,
   },
   listContent: {
-    padding: Spacing.lg,
     paddingBottom: Spacing.xl * 2,
   },
   emptyListContent: {
     flexGrow: 1,
-    justifyContent: 'center',
   },
   card: {
-    backgroundColor: Colors.bg.secondary,
-    borderRadius: BorderRadius.lg,
+    marginHorizontal: 18,
+    backgroundColor: LightColors.surface,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: Colors.border.default,
-    padding: Spacing.md,
-    marginBottom: Spacing.md,
+    borderColor: LightColors.border,
+    padding: 16,
+    marginBottom: 13,
   },
   cardHeader: {
+    flexWrap: 'wrap',
+    gap: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -536,22 +601,22 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
   },
   attemptBadgeText: {
-    color: Colors.report.pending,
-    fontSize: FontSize.xs,
+    color: '#946000',
+    ...MobileTypography.caption,
     fontWeight: '600',
   },
   queuedBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: Colors.input.bg,
+    backgroundColor: LightColors.surfaceMuted,
     paddingHorizontal: Spacing.sm,
     paddingVertical: 3,
     borderRadius: BorderRadius.full,
   },
   queuedBadgeText: {
-    color: Colors.text.muted,
-    fontSize: FontSize.xs,
+    color: LightColors.mutedText,
+    ...MobileTypography.caption,
     fontWeight: '500',
   },
   cardBody: {
@@ -563,7 +628,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: BorderRadius.md,
-    backgroundColor: Colors.input.bg,
+    backgroundColor: LightColors.surfaceMuted,
   },
   noThumbWrap: {
     justifyContent: 'center',
@@ -580,20 +645,20 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   locationText: {
-    fontSize: FontSize.sm,
+    ...MobileTypography.label,
     fontWeight: '700',
-    color: Colors.text.primary,
+    color: LightColors.text,
     flex: 1,
   },
   districtText: {
-    fontSize: FontSize.xs,
-    color: Colors.text.muted,
+    ...MobileTypography.caption,
+    color: LightColors.mutedText,
     marginBottom: 4,
   },
   descriptionSnippet: {
-    fontSize: FontSize.xs,
-    color: Colors.text.secondary,
-    lineHeight: 16,
+    ...MobileTypography.caption,
+    color: LightColors.secondaryText,
+    lineHeight: 22,
   },
   errorAlertBox: {
     flexDirection: 'row',
@@ -605,24 +670,24 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   errorAlertText: {
-    fontSize: FontSize.xs,
-    color: Colors.status.danger,
+    ...MobileTypography.caption,
+    color: LightColors.danger,
     flex: 1,
   },
   cardFooter: {
+    flexWrap: 'wrap',
+    gap: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingTop: Spacing.sm,
     borderTopWidth: 1,
-    borderTopColor: Colors.border.default,
+    borderTopColor: LightColors.border,
   },
-  timestampWrap: {
-    flex: 1,
-  },
+  timestampWrap: { minWidth: 160, flex: 1 },
   timeLabel: {
-    fontSize: FontSize.xs - 1,
-    color: Colors.text.muted,
+    ...MobileTypography.small,
+    color: LightColors.mutedText,
   },
   cardActionButtons: {
     flexDirection: 'row',
@@ -630,15 +695,16 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   discardButton: {
-    width: 34,
-    height: 34,
+    width: 44,
+    height: 44,
     borderRadius: BorderRadius.sm,
     backgroundColor: 'rgba(239, 68, 68, 0.12)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   syncItemButton: {
-    backgroundColor: Colors.accent.primary,
+    minHeight: 44,
+    backgroundColor: LightColors.primary,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -649,7 +715,7 @@ const styles = StyleSheet.create({
   },
   syncItemButtonText: {
     color: '#FFF',
-    fontSize: FontSize.xs,
+    ...MobileTypography.caption,
     fontWeight: '700',
   },
 });

@@ -1,3 +1,8 @@
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+jest.mock('@/services/resourceAuthorization', () => ({
+  requireDistrictOfficer: jest.fn(async () => 'district-officer'),
+  requireActiveResourceEvent: jest.fn(async () => {}),
+}));
 /**
  * Unit Tests for UC03 Shelter Service (`services/shelterService.ts`).
  *
@@ -17,17 +22,8 @@ import {
   updateOccupancy,
   deactivateShelter,
 } from '@/services/shelterService';
-import {
-  addDoc,
-  updateDoc,
-  getDocs,
-  collection,
-  doc,
-  query,
-  where,
-  onSnapshot,
-} from 'firebase/firestore';
-import type { CreateShelterData, Shelter } from '@/types/resources';
+import { addDoc, updateDoc, getDocs, collection, where, onSnapshot } from 'firebase/firestore';
+import type { CreateShelterData } from '@/types/resources';
 
 describe('UC03: Shelter Service CRUD & Lifecycle Management', () => {
   const sampleShelterData: CreateShelterData = {
@@ -47,6 +43,14 @@ describe('UC03: Shelter Service CRUD & Lifecycle Management', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    installResourceFirestore({
+      'shelters/shelter-ratnapura-01': {
+        status: 'active',
+        capacity: 250,
+        currentOccupancy: 0,
+        district: 'Ratnapura',
+      },
+    });
   });
 
   describe('Shelter Registration (UC03 Main Flow Steps 41–46)', () => {
@@ -67,10 +71,10 @@ describe('UC03: Shelter Service CRUD & Lifecycle Management', () => {
           currentOccupancy: 0,
           status: 'registered',
           hazardEventId: '',
-          createdBy: 'officer-user-101',
+          createdBy: 'district-officer',
           organisationType: 'government',
           organisationName: 'District Secretariat Ratnapura',
-        }),
+        })
       );
     });
 
@@ -94,13 +98,16 @@ describe('UC03: Shelter Service CRUD & Lifecycle Management', () => {
           organisationType: 'ngo',
           organisationName: 'Sri Lanka Red Cross Society',
           status: 'registered',
-        }),
+        })
       );
     });
   });
 
   describe('Shelter Activation (UC03 Main Flow Steps 47–48)', () => {
     it('should activate a shelter for an active hazard event and set status to "active"', async () => {
+      installResourceFirestore({
+        'shelters/shelter-ratnapura-01': { status: 'registered', district: 'Ratnapura' },
+      });
       await activateShelter('shelter-ratnapura-01', 'event-monsoon-2026');
 
       expect(updateDoc).toHaveBeenCalledTimes(1);
@@ -109,7 +116,7 @@ describe('UC03: Shelter Service CRUD & Lifecycle Management', () => {
         expect.objectContaining({
           status: 'active',
           hazardEventId: 'event-monsoon-2026',
-        }),
+        })
       );
     });
   });
@@ -125,7 +132,7 @@ describe('UC03: Shelter Service CRUD & Lifecycle Management', () => {
         expect.objectContaining({
           currentOccupancy: 150,
           status: 'active',
-        }),
+        })
       );
     });
 
@@ -138,7 +145,7 @@ describe('UC03: Shelter Service CRUD & Lifecycle Management', () => {
         expect.objectContaining({
           currentOccupancy: 250,
           status: 'active',
-        }),
+        })
       );
     });
 
@@ -152,7 +159,7 @@ describe('UC03: Shelter Service CRUD & Lifecycle Management', () => {
         expect.objectContaining({
           currentOccupancy: 280,
           status: 'over_capacity',
-        }),
+        })
       );
     });
 
@@ -165,7 +172,7 @@ describe('UC03: Shelter Service CRUD & Lifecycle Management', () => {
         expect.objectContaining({
           currentOccupancy: 200,
           status: 'active',
-        }),
+        })
       );
     });
 
@@ -177,7 +184,7 @@ describe('UC03: Shelter Service CRUD & Lifecycle Management', () => {
         expect.objectContaining({
           currentOccupancy: 0,
           status: 'active',
-        }),
+        })
       );
     });
   });
@@ -192,7 +199,7 @@ describe('UC03: Shelter Service CRUD & Lifecycle Management', () => {
         expect.objectContaining({
           status: 'inactive',
           hazardEventId: '',
-        }),
+        })
       );
     });
   });

@@ -1,3 +1,21 @@
+import { auth } from '@/services/firebase';
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+beforeEach(() => {
+  Object.assign(auth, { currentUser: { uid: 'officer-uid' } });
+  installResourceFirestore({
+    'users/officer-uid': { role: 'dmc_officer' },
+    'hazardEvents/event-kelani-flood-2026': {
+      status: 'active',
+      hazardType: 'flood',
+      title: 'Fixture flood event',
+    },
+    'warnings/warn-initial-advisory-123': {
+      eventId: 'event-kelani-flood-2026',
+      severity: 'advisory',
+      status: 'delivered',
+    },
+  });
+});
 /**
  * Unit Tests for Ground Reports Empty State & Warning Escalation Flow (UC01).
  */
@@ -20,7 +38,13 @@ jest.mock('@/services/recipientService', () => {
       }
       return {
         recipients: [
-          { id: 'u-1', fullName: 'User 1', district: 'Ratnapura', role: 'citizen', email: 'u1@test.com' },
+          {
+            id: 'u-1',
+            fullName: 'User 1',
+            district: 'Ratnapura',
+            role: 'citizen',
+            email: 'u1@test.com',
+          },
         ],
         recipientCount: 25,
         contributingDistricts: ['Ratnapura'],
@@ -70,7 +94,7 @@ describe('UC01 Warning Escalation Workflow', () => {
     const pipelineResult = await executeWarningDispatchPipeline(
       escalatedPayload,
       'officer-uid',
-      'Duty Officer Silva',
+      'Duty Officer Silva'
     );
 
     expect(pipelineResult.warningId).toBeDefined();

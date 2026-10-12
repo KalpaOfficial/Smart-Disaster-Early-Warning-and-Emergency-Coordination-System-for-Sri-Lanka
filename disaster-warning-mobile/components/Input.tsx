@@ -10,16 +10,27 @@ import {
   TouchableOpacity,
   type TextInputProps,
   type ViewStyle,
+  type TextStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, BorderRadius, FontSize, Spacing } from '@/constants/colors';
+import {
+  Colors,
+  LightColors,
+  BorderRadius,
+  FontSize,
+  Spacing,
+  MobileTypography,
+} from '@/constants/colors';
 
 interface InputProps extends Omit<TextInputProps, 'style'> {
   label?: string;
   error?: string;
   icon?: React.ReactNode;
   containerStyle?: ViewStyle;
+  inputStyle?: TextStyle;
   isPassword?: boolean;
+  appearance?: 'dark' | 'light';
+  inputRef?: React.Ref<TextInput>;
 }
 
 export function Input({
@@ -27,26 +38,42 @@ export function Input({
   error,
   icon,
   containerStyle,
+  inputStyle,
   isPassword = false,
+  appearance = 'dark',
+  inputRef,
   ...textInputProps
 }: InputProps) {
   const [isFocused, setIsFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const isLight = appearance === 'light';
 
   return (
     <View style={[styles.container, containerStyle]}>
-      {Boolean(label) && <Text style={styles.label}>{label}</Text>}
+      {label ? <Text style={[styles.label, isLight && styles.lightLabel]}>{label}</Text> : null}
       <View
         style={[
           styles.inputWrapper,
+          isLight && styles.lightWrapper,
           isFocused ? styles.focused : undefined,
-          Boolean(error) ? styles.errored : undefined,
+          isFocused && isLight && styles.lightFocused,
+          error ? styles.errored : undefined,
+          error && isLight ? styles.lightErrored : undefined,
         ]}
       >
         {Boolean(icon) && <View style={styles.iconWrapper}>{icon}</View>}
         <TextInput
-          style={[styles.input, Boolean(icon) ? styles.inputWithIcon : undefined]}
-          placeholderTextColor={Colors.input.placeholder}
+          ref={inputRef}
+          style={[
+            styles.input,
+            isLight && styles.lightInput,
+            icon ? styles.inputWithIcon : undefined,
+            inputStyle,
+          ]}
+          placeholderTextColor={isLight ? LightColors.mutedText : Colors.input.placeholder}
+          selectionColor={isLight ? LightColors.primary : Colors.accent.primary}
+          accessibilityLabel={label}
+          aria-invalid={!!error}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           secureTextEntry={isPassword && !showPassword}
@@ -57,21 +84,63 @@ export function Input({
             onPress={() => setShowPassword(!showPassword)}
             style={styles.eyeButton}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+            accessibilityState={{ disabled: textInputProps.editable === false }}
+            disabled={textInputProps.editable === false}
           >
             <Ionicons
               name={showPassword ? 'eye-off-outline' : 'eye-outline'}
               size={20}
-              color={Colors.text.tertiary}
+              color={isLight ? LightColors.secondaryText : Colors.text.tertiary}
             />
           </TouchableOpacity>
         )}
       </View>
-      {Boolean(error) && <Text style={styles.errorText}>{error}</Text>}
+      {error ? (
+        <Text
+          accessibilityRole="alert"
+          accessibilityLiveRegion="polite"
+          style={[styles.errorText, isLight && styles.lightErrorText]}
+        >
+          {error}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  lightLabel: {
+    color: LightColors.text,
+    textTransform: 'none',
+    letterSpacing: 0,
+    ...MobileTypography.label,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  lightWrapper: {
+    backgroundColor: LightColors.surfaceMuted,
+    borderColor: LightColors.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    minHeight: 54,
+  },
+  lightFocused: {
+    backgroundColor: LightColors.surface,
+    borderColor: LightColors.primary,
+    shadowColor: LightColors.primary,
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 0,
+  },
+  lightInput: {
+    color: LightColors.text,
+    paddingVertical: 16,
+    ...MobileTypography.body,
+  },
+  lightErrored: { borderColor: LightColors.danger },
+  lightErrorText: { color: LightColors.danger, ...MobileTypography.caption },
   container: {
     marginBottom: Spacing.lg,
   },
@@ -105,6 +174,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
+    minWidth: 0,
     color: Colors.text.primary,
     fontSize: FontSize.md,
     paddingVertical: Spacing.md,
@@ -117,6 +187,7 @@ const styles = StyleSheet.create({
     paddingLeft: Spacing.lg,
   },
   eyeButton: {
+    flexShrink: 0,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
   },

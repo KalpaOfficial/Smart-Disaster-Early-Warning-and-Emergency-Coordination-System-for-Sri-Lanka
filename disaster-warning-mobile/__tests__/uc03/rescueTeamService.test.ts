@@ -1,3 +1,8 @@
+import { installResourceFirestore } from '../helpers/resourceFirestore';
+jest.mock('@/services/resourceAuthorization', () => ({
+  requireDistrictOfficer: jest.fn(async () => 'district-officer'),
+  requireActiveResourceEvent: jest.fn(async () => {}),
+}));
 /**
  * Unit Tests for UC03 Rescue Team Service (`services/rescueTeamService.ts`).
  *
@@ -15,17 +20,8 @@ import {
   dispatchTeam,
   updateTeamStatus,
 } from '@/services/rescueTeamService';
-import {
-  addDoc,
-  updateDoc,
-  getDocs,
-  collection,
-  doc,
-  query,
-  where,
-  onSnapshot,
-} from 'firebase/firestore';
-import type { CreateRescueTeamData, RescueTeam, TeamStatus } from '@/types/resources';
+import { addDoc, updateDoc, getDocs, collection, where, onSnapshot } from 'firebase/firestore';
+import type { CreateRescueTeamData } from '@/types/resources';
 
 describe('UC03: Rescue Team Coordination Service', () => {
   const sampleTeamData: CreateRescueTeamData = {
@@ -39,6 +35,9 @@ describe('UC03: Rescue Team Coordination Service', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    installResourceFirestore({
+      'rescueTeams/team-navy-rabs-04': { status: 'available', district: 'Ratnapura' },
+    });
   });
 
   describe('Rescue Team Registration (UC03 Main Flow Steps 51–52)', () => {
@@ -59,8 +58,8 @@ describe('UC03: Rescue Team Coordination Service', () => {
           specialisation: 'Water / Flood Rescue',
           district: 'Ratnapura',
           status: 'available',
-          createdBy: 'officer-user-101',
-        }),
+          createdBy: 'district-officer',
+        })
       );
     });
 
@@ -84,14 +83,18 @@ describe('UC03: Rescue Team Coordination Service', () => {
         expect.objectContaining({
           organisationType: 'ngo',
           status: 'available',
-        }),
+        })
       );
     });
   });
 
   describe('Rescue Team Dispatch (UC03 Main Flow Steps 53–54)', () => {
     it('should dispatch an available team to a response sector and update status to "dispatched"', async () => {
-      await dispatchTeam('team-navy-rabs-04', 'Elapatha Flood Inundation Zone', 'event-monsoon-2026');
+      await dispatchTeam(
+        'team-navy-rabs-04',
+        'Elapatha Flood Inundation Zone',
+        'event-monsoon-2026'
+      );
 
       expect(updateDoc).toHaveBeenCalledTimes(1);
       expect(updateDoc).toHaveBeenCalledWith(
@@ -100,44 +103,53 @@ describe('UC03: Rescue Team Coordination Service', () => {
           status: 'dispatched',
           assignedLocation: 'Elapatha Flood Inundation Zone',
           hazardEventId: 'event-monsoon-2026',
-        }),
+        })
       );
     });
   });
 
   describe('Rescue Team Status Transitions (UC03 Steps 55–56 & Alternate Flows)', () => {
     it('should advance status to "en_route" while preserving assigned location', async () => {
+      installResourceFirestore({
+        'rescueTeams/team-navy-rabs-04': { status: 'dispatched', district: 'Ratnapura' },
+      });
       await updateTeamStatus('team-navy-rabs-04', 'en_route');
 
       expect(updateDoc).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           status: 'en_route',
-        }),
+        })
       );
       // Location should NOT be cleared for en_route
       expect(updateDoc).not.toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ assignedLocation: '' }),
+        expect.objectContaining({ assignedLocation: '' })
       );
     });
 
     it('should advance status to "on_site" when unit arrives at operational sector', async () => {
+      installResourceFirestore({
+        'rescueTeams/team-navy-rabs-04': { status: 'en_route', district: 'Ratnapura' },
+      });
       await updateTeamStatus('team-navy-rabs-04', 'on_site');
 
       expect(updateDoc).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           status: 'on_site',
-        }),
+        })
       );
       expect(updateDoc).not.toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ assignedLocation: '' }),
+        expect.objectContaining({ assignedLocation: '' })
       );
     });
 
     it('should clear assignedLocation when mission status advances to "completed"', async () => {
+      installResourceFirestore({
+        'rescueTeams/team-navy-rabs-04': { status: 'on_site', district: 'Ratnapura' },
+      });
       await updateTeamStatus('team-navy-rabs-04', 'completed');
 
       expect(updateDoc).toHaveBeenCalledWith(
@@ -145,11 +157,14 @@ describe('UC03: Rescue Team Coordination Service', () => {
         expect.objectContaining({
           status: 'completed',
           assignedLocation: '',
-        }),
+        })
       );
     });
 
     it('should clear assignedLocation when team status resets to "available"', async () => {
+      installResourceFirestore({
+        'rescueTeams/team-navy-rabs-04': { status: 'completed', district: 'Ratnapura' },
+      });
       await updateTeamStatus('team-navy-rabs-04', 'available');
 
       expect(updateDoc).toHaveBeenCalledWith(
@@ -157,7 +172,7 @@ describe('UC03: Rescue Team Coordination Service', () => {
         expect.objectContaining({
           status: 'available',
           assignedLocation: '',
-        }),
+        })
       );
     });
 
@@ -168,7 +183,7 @@ describe('UC03: Rescue Team Coordination Service', () => {
         expect.anything(),
         expect.objectContaining({
           status: 'unavailable',
-        }),
+        })
       );
     });
   });

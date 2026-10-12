@@ -38,19 +38,31 @@ export interface ChannelExecutionOptions {
   customErrorMessage?: string;
 }
 
+function noRecipients(channel: DeliveryChannel): ChannelResult {
+  return {
+    channel,
+    recipientCount: 0,
+    deliveredCount: 0,
+    failedCount: 0,
+    status: 'Failed',
+    errorMessage: 'No registered recipients found for the selected target area.',
+  };
+}
+
 /**
  * 1. Push Notification Delivery Service (sendPush)
  * Simulates mobile app push notification dispatch to resolved recipient tokens.
  */
 export async function sendPush(
-  warning: Partial<HazardWarning | CreateWarningPayload>,
+  _warning: Partial<HazardWarning | CreateWarningPayload>,
   recipients: RecipientUser[],
-  options?: ChannelExecutionOptions,
+  options?: ChannelExecutionOptions
 ): Promise<ChannelResult> {
   // Simulate network latency for Push Notification Server handshakes
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await new Promise(resolve => setTimeout(resolve, 300));
 
-  const recipientCount = recipients.length || warning.recipientCount || 0;
+  const recipientCount = recipients.length;
+  if (!recipientCount) return noRecipients('push');
 
   if (options?.mockFailure) {
     return {
@@ -59,7 +71,9 @@ export async function sendPush(
       deliveredCount: 0,
       failedCount: recipientCount,
       status: 'Failed',
-      errorMessage: options.customErrorMessage || 'Push Notification Service Gateway unreachable (Connection Timeout).',
+      errorMessage:
+        options.customErrorMessage ||
+        'Push Notification Service Gateway unreachable (Connection Timeout).',
     };
   }
 
@@ -90,14 +104,15 @@ export async function sendPush(
  * Simulates SMS gateway broadcast to registered recipient mobile numbers.
  */
 export async function sendSMS(
-  warning: Partial<HazardWarning | CreateWarningPayload>,
+  _warning: Partial<HazardWarning | CreateWarningPayload>,
   recipients: RecipientUser[],
-  options?: ChannelExecutionOptions,
+  options?: ChannelExecutionOptions
 ): Promise<ChannelResult> {
   // Simulate Telco SMS Gateway queue submission latency
-  await new Promise((resolve) => setTimeout(resolve, 400));
+  await new Promise(resolve => setTimeout(resolve, 400));
 
-  const recipientCount = recipients.length || warning.recipientCount || 0;
+  const recipientCount = recipients.length;
+  if (!recipientCount) return noRecipients('sms');
 
   if (options?.mockFailure) {
     return {
@@ -106,7 +121,9 @@ export async function sendSMS(
       deliveredCount: 0,
       failedCount: recipientCount,
       status: 'Failed',
-      errorMessage: options.customErrorMessage || 'Cellular SMS Gateway Error: Network carrier rejected payload or quota exceeded.',
+      errorMessage:
+        options.customErrorMessage ||
+        'Cellular SMS Gateway Error: Network carrier rejected payload or quota exceeded.',
     };
   }
 
@@ -137,14 +154,15 @@ export async function sendSMS(
  * Simulates physical acoustic siren control tower activation in target districts/river basins.
  */
 export async function sendAudible(
-  warning: Partial<HazardWarning | CreateWarningPayload>,
+  _warning: Partial<HazardWarning | CreateWarningPayload>,
   recipients: RecipientUser[],
-  options?: ChannelExecutionOptions,
+  options?: ChannelExecutionOptions
 ): Promise<ChannelResult> {
   // Simulate IoT Control Tower RF signal activation
-  await new Promise((resolve) => setTimeout(resolve, 350));
+  await new Promise(resolve => setTimeout(resolve, 350));
 
-  const recipientCount = recipients.length || warning.recipientCount || 0;
+  const recipientCount = recipients.length;
+  if (!recipientCount) return noRecipients('audible');
 
   if (options?.mockFailure) {
     return {
@@ -153,7 +171,9 @@ export async function sendAudible(
       deliveredCount: 0,
       failedCount: recipientCount,
       status: 'Failed',
-      errorMessage: options.customErrorMessage || 'Audible Siren Control Tower Offline: Grid power failure in target sectors.',
+      errorMessage:
+        options.customErrorMessage ||
+        'Audible Siren Control Tower Offline: Grid power failure in target sectors.',
     };
   }
 
@@ -188,7 +208,7 @@ export async function dispatchMultiChannelWarning(
   warning: Partial<HazardWarning | CreateWarningPayload>,
   recipients: RecipientUser[],
   channels: DeliveryChannel[],
-  options?: Partial<Record<DeliveryChannel, ChannelExecutionOptions>>,
+  options?: Partial<Record<DeliveryChannel, ChannelExecutionOptions>>
 ): Promise<MultiChannelDeliverySummary> {
   const channelPromises = channels.map(async (channel): Promise<ChannelResult> => {
     const channelOptions = options?.[channel];
@@ -203,9 +223,9 @@ export async function dispatchMultiChannelWarning(
         default:
           return {
             channel,
-            recipientCount: recipients.length || warning.recipientCount || 0,
+            recipientCount: recipients.length,
             deliveredCount: 0,
-            failedCount: recipients.length || warning.recipientCount || 0,
+            failedCount: recipients.length,
             status: 'Failed',
             errorMessage: `Unsupported delivery channel "${channel}".`,
           };
@@ -214,11 +234,12 @@ export async function dispatchMultiChannelWarning(
       // Channel Exception Safeguard — Prevents single channel crash from halting others
       return {
         channel,
-        recipientCount: recipients.length || warning.recipientCount || 0,
+        recipientCount: recipients.length,
         deliveredCount: 0,
-        failedCount: recipients.length || warning.recipientCount || 0,
+        failedCount: recipients.length,
         status: 'Failed',
-        errorMessage: (error as Error).message || `Unexpected exception during ${channel} dispatch.`,
+        errorMessage:
+          (error as Error).message || `Unexpected exception during ${channel} dispatch.`,
       };
     }
   });
@@ -229,12 +250,12 @@ export async function dispatchMultiChannelWarning(
   const totalFailed = channelResults.reduce((acc, r) => acc + r.failedCount, 0);
   const totalRecipients = channelResults.reduce((acc, r) => acc + r.recipientCount, 0);
 
-  const failedCount = channelResults.filter((r) => r.status === 'Failed').length;
+  const failedCount = channelResults.filter(r => r.status === 'Failed').length;
 
   let overallStatus: ChannelDeliveryStatus = 'Success';
   if (failedCount === channels.length) {
     overallStatus = 'Failed';
-  } else if (failedCount > 0 || channelResults.some((r) => r.status === 'Partial')) {
+  } else if (failedCount > 0 || channelResults.some(r => r.status === 'Partial')) {
     overallStatus = 'Partial';
   } else {
     overallStatus = 'Success';
@@ -255,7 +276,7 @@ export async function dispatchMultiChannelWarning(
 export async function executeDelivery(
   channels: DeliveryChannel[],
   recipientCount: number,
-  forceChannelFailure?: DeliveryChannel,
+  forceChannelFailure?: DeliveryChannel
 ): Promise<{ channelResults: ChannelDeliveryResult[]; overallStatus: WarningStatus }> {
   const mockOptions: Partial<Record<DeliveryChannel, ChannelExecutionOptions>> = {};
   if (forceChannelFailure) {
@@ -274,7 +295,7 @@ export async function executeDelivery(
     { recipientCount },
     mockRecipients,
     channels,
-    mockOptions,
+    mockOptions
   );
 
   let overallStatus: WarningStatus = 'delivered';
@@ -284,7 +305,7 @@ export async function executeDelivery(
     overallStatus = 'partially_failed';
   }
 
-  const legacyResults: ChannelDeliveryResult[] = summary.channelResults.map((r) => ({
+  const legacyResults: ChannelDeliveryResult[] = summary.channelResults.map(r => ({
     channel: r.channel,
     status: r.status === 'Success' ? 'success' : 'failed',
     recipientCount: r.recipientCount,

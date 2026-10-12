@@ -1,3 +1,8 @@
+import { installResourceFirestore, transactionSet } from '../helpers/resourceFirestore';
+jest.mock('@/services/resourceAuthorization', () => ({
+  requireDistrictOfficer: jest.fn(async () => 'district-officer'),
+  requireActiveResourceEvent: jest.fn(async () => {}),
+}));
 /**
  * Unit Tests for UC03 Relief Supply Service (`services/reliefSupplyService.ts`).
  *
@@ -22,17 +27,10 @@ import {
   getDoc,
   getDocs,
   collection,
-  doc,
-  query,
   where,
   onSnapshot,
 } from 'firebase/firestore';
-import type {
-  CreateReliefSupplyData,
-  CreateDistributionData,
-  ReliefSupply,
-  Distribution,
-} from '@/types/resources';
+import type { CreateReliefSupplyData, CreateDistributionData } from '@/types/resources';
 
 describe('UC03: Relief Supply Service & Distribution Workflow', () => {
   const sampleSupplyData: CreateReliefSupplyData = {
@@ -47,13 +45,18 @@ describe('UC03: Relief Supply Service & Distribution Workflow', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    installResourceFirestore({});
   });
 
   describe('Relief Supply Inventory Registration (UC03 Steps 57–58)', () => {
     it('should register a new relief supply item with initial remainingQuantity equal to totalQuantity', async () => {
       (addDoc as jest.Mock).mockResolvedValueOnce({ id: 'supply-water-5000' });
 
-      const supplyId = await createSupply(sampleSupplyData, 'officer-user-101', 'event-monsoon-2026');
+      const supplyId = await createSupply(
+        sampleSupplyData,
+        'officer-user-101',
+        'event-monsoon-2026'
+      );
 
       expect(supplyId).toBe('supply-water-5000');
       expect(addDoc).toHaveBeenCalledTimes(1);
@@ -69,8 +72,8 @@ describe('UC03: Relief Supply Service & Distribution Workflow', () => {
           organisationType: 'ngo',
           district: 'Ratnapura',
           hazardEventId: 'event-monsoon-2026',
-          createdBy: 'officer-user-101',
-        }),
+          createdBy: 'district-officer',
+        })
       );
     });
 
@@ -97,7 +100,7 @@ describe('UC03: Relief Supply Service & Distribution Workflow', () => {
           totalQuantity: 300,
           remainingQuantity: 300,
           organisationType: 'government',
-        }),
+        })
       );
     });
   });
@@ -125,18 +128,17 @@ describe('UC03: Relief Supply Service & Distribution Workflow', () => {
         }),
       };
       (getDoc as jest.Mock).mockResolvedValueOnce(mockSupplyDoc);
-      (addDoc as jest.Mock).mockResolvedValueOnce({ id: 'dist-txn-001' });
 
       const distId = await distributeSupply(
         validDistribution,
         'officer-user-101',
-        'event-monsoon-2026',
+        'event-monsoon-2026'
       );
 
-      expect(distId).toBe('dist-txn-001');
+      expect(distId).toMatch(/^generated-/);
 
       // 1. Verifies distribution record written to 'distributions' collection
-      expect(addDoc).toHaveBeenCalledWith(
+      expect(transactionSet).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           supplyId: 'supply-water-5000',
@@ -145,9 +147,9 @@ describe('UC03: Relief Supply Service & Distribution Workflow', () => {
           unit: 'bottles',
           destinationDistrict: 'Ratnapura',
           destinationLocation: 'Ratnapura Central College Safe Haven',
-          distributedBy: 'officer-user-101',
+          distributedBy: 'district-officer',
           hazardEventId: 'event-monsoon-2026',
-        }),
+        })
       );
 
       // 2. Verifies supply document updated with decremented remainingQuantity: 5000 - 1200 = 3800
@@ -155,7 +157,7 @@ describe('UC03: Relief Supply Service & Distribution Workflow', () => {
         expect.anything(),
         expect.objectContaining({
           remainingQuantity: 3800,
-        }),
+        })
       );
     });
 
@@ -170,20 +172,19 @@ describe('UC03: Relief Supply Service & Distribution Workflow', () => {
         }),
       };
       (getDoc as jest.Mock).mockResolvedValueOnce(mockSupplyDoc);
-      (addDoc as jest.Mock).mockResolvedValueOnce({ id: 'dist-txn-002' });
 
       const distId = await distributeSupply(
         validDistribution,
         'officer-user-101',
-        'event-monsoon-2026',
+        'event-monsoon-2026'
       );
 
-      expect(distId).toBe('dist-txn-002');
+      expect(distId).toMatch(/^generated-/);
       expect(updateDoc).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           remainingQuantity: 0,
-        }),
+        })
       );
     });
 
@@ -198,19 +199,18 @@ describe('UC03: Relief Supply Service & Distribution Workflow', () => {
         }),
       };
       (getDoc as jest.Mock).mockResolvedValueOnce(mockSupplyDoc);
-      (addDoc as jest.Mock).mockResolvedValueOnce({ id: 'dist-txn-003' });
 
       await distributeSupply(
         { ...validDistribution, quantity: 500 },
         'officer-user-101',
-        'event-monsoon-2026',
+        'event-monsoon-2026'
       );
 
       expect(updateDoc).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           remainingQuantity: 1500, // 2000 - 500
-        }),
+        })
       );
     });
   });
@@ -239,7 +239,7 @@ describe('UC03: Relief Supply Service & Distribution Workflow', () => {
       };
 
       await expect(
-        distributeSupply(excessRequest, 'officer-user-101', 'event-monsoon-2026'),
+        distributeSupply(excessRequest, 'officer-user-101', 'event-monsoon-2026')
       ).rejects.toThrow('Insufficient supplies. Requested: 1500, Available: 800');
 
       // Verifies no distribution document was added and no update occurred
@@ -263,7 +263,7 @@ describe('UC03: Relief Supply Service & Distribution Workflow', () => {
       };
 
       await expect(
-        distributeSupply(invalidItemRequest, 'officer-user-101', 'event-monsoon-2026'),
+        distributeSupply(invalidItemRequest, 'officer-user-101', 'event-monsoon-2026')
       ).rejects.toThrow('Supply item does not exist in inventory');
 
       expect(addDoc).not.toHaveBeenCalled();

@@ -22,28 +22,27 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
 import { ScreenContainer } from '@/components/ScreenContainer';
-import { Card } from '@/components/Card';
-import { Button } from '@/components/Button';
+import {
+  OfficerCard as Card,
+  OfficerButton as Button,
+  OfficerHero,
+  officerScreenStyle,
+  officerShellStyle,
+} from '@/components/OfficerUi';
 import { Input } from '@/components/Input';
-import { Select } from '@/components/Select';
+import { FormError } from '@/components/FormError';
 import { MobileNavBar } from '@/components/MobileNavBar';
 import { FormModal } from '@/components/FormModal';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/colors';
+import { OfficerColors as Colors } from '@/components/OfficerUi';
 import { SRI_LANKAN_DISTRICTS } from '@/constants/districts';
 import { SRI_LANKA_RIVER_BASINS } from '@/constants/riverBasins';
 import { getHazardEvent } from '@/services/hazardEventService';
 import { resolveRecipients } from '@/services/recipientService';
-import {
-  executeWarningDispatchPipeline,
-  getWarningById,
-  type WarningDispatchPipelineResult,
-} from '@/services/warningService';
-import type { ChannelExecutionOptions } from '@/services/deliveryService';
+import { executeWarningDispatchPipeline, getWarningById } from '@/services/warningService';
 import type { HazardEvent, HazardType } from '@/types/resources';
 import type {
   WarningSeverity,
@@ -53,16 +52,30 @@ import type {
   HazardWarning,
 } from '@/types/warning';
 
-const SEVERITY_OPTIONS: { label: string; value: WarningSeverity }[] = [
-  { label: '🔴 RED — Immediate Evacuation Order', value: 'evacuation' },
-  { label: '🟠 AMBER — Severe Warning (Prepare to Move)', value: 'warning' },
-  { label: '🟡 YELLOW — General Hazard Advisory', value: 'advisory' },
-];
-
-const AVAILABLE_CHANNELS: { id: DeliveryChannel; label: string; icon: keyof typeof Ionicons.glyphMap; desc: string }[] = [
-  { id: 'push', label: 'Push Notification', icon: 'notifications', desc: 'Instant mobile app alert' },
-  { id: 'sms', label: 'SMS Gateway', icon: 'chatbox-ellipses', desc: 'Direct cellular text message' },
-  { id: 'audible', label: 'Audible Siren', icon: 'volume-high', desc: 'Emergency siren sound broadcast' },
+const AVAILABLE_CHANNELS: {
+  id: DeliveryChannel;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  desc: string;
+}[] = [
+  {
+    id: 'push',
+    label: 'App notification',
+    icon: 'notifications',
+    desc: 'Instant mobile app alert',
+  },
+  {
+    id: 'sms',
+    label: 'SMS message',
+    icon: 'chatbox-ellipses',
+    desc: 'Direct cellular text message',
+  },
+  {
+    id: 'audible',
+    label: 'Emergency siren',
+    icon: 'volume-high',
+    desc: 'Audible alert for affected communities',
+  },
 ];
 
 export default function WarningComposerScreen() {
@@ -89,8 +102,14 @@ export default function WarningComposerScreen() {
   const [targetAreas, setTargetAreas] = useState<string[]>([]);
   const [headline, setHeadline] = useState('');
   const [instructions, setInstructions] = useState('');
-  const [deliveryChannels, setDeliveryChannels] = useState<DeliveryChannel[]>(['push', 'sms', 'audible']);
-  const [simulationMode, setSimulationMode] = useState<'standard' | 'scenario_a' | 'scenario_b'>('standard');
+  const [deliveryChannels, setDeliveryChannels] = useState<DeliveryChannel[]>([
+    'push',
+    'sms',
+    'audible',
+  ]);
+  const [showAreas, setShowAreas] = useState(false);
+  const [areaSearch, setAreaSearch] = useState('');
+  const [recipientError, setRecipientError] = useState('');
 
   // Recipient Resolution State
   const [resolvedDistricts, setResolvedDistricts] = useState<string[]>([]);
@@ -99,9 +118,14 @@ export default function WarningComposerScreen() {
 
   // Validation & Payload Modal State
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const fieldMessages = [
+    'Warning Headline is required.',
+    'Instruction Text is required.',
+    'At least one target area must be selected.',
+    'At least one Delivery Channel (Push, SMS, or Audible) must be selected.',
+  ];
+  const generalErrors = validationErrors.filter(message => !fieldMessages.includes(message));
   const [preparedPayload, setPreparedPayload] = useState<CreateWarningPayload | null>(null);
-  const [createdWarningId, setCreatedWarningId] = useState<string | null>(null);
-  const [pipelineResult, setPipelineResult] = useState<WarningDispatchPipelineResult | null>(null);
   const [showPayloadModal, setShowPayloadModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -133,6 +157,10 @@ export default function WarningComposerScreen() {
         if (fetchedEvent) {
           setEvent(fetchedEvent);
           setHazardType(fetchedEvent.hazardType);
+          if (fetchedEvent.status !== 'active')
+            setEventError(
+              'This event is closed. Reopen it from Manage hazard events before issuing another warning.'
+            );
         }
       }
 
@@ -155,28 +183,30 @@ export default function WarningComposerScreen() {
           setDeliveryChannels(fetchedWarning.deliveryChannels);
         }
 
-        const baseHeadline = fetchedWarning.headline.replace(/^ESCALATED ALERT:\s*/i, '');
-        setHeadline(`ESCALATED ALERT: ${baseHeadline}`);
-        setInstructions(
-          fetchedWarning.instructions
-            ? `${fetchedWarning.instructions}\n\n[ESCALATION NOTICE]: Hazard situation has intensified. Immediate emergency precautionary/evacuation actions required.`
-            : `Severe threat escalation. Follow official directives from DMC duty officers immediately.`
+        const baseHeadline = fetchedWarning.headline.replace(
+          /^(?:ESCALATED ALERT:\s*|EMERGENCY ALERT:\s*)+/i,
+          ''
         );
+        setHeadline(baseHeadline);
+        setInstructions(fetchedWarning.instructions || '');
       } else if (fetchedEvent) {
         // Normal compose mode: pre-fill target areas from event if available
         if (fetchedEvent.affectedDistricts && fetchedEvent.affectedDistricts.length > 0) {
           setTargetAreas(fetchedEvent.affectedDistricts);
           setTargetMode('district');
-        } else if (fetchedEvent.affectedRiverBasins && fetchedEvent.affectedRiverBasins.length > 0) {
+        } else if (
+          fetchedEvent.affectedRiverBasins &&
+          fetchedEvent.affectedRiverBasins.length > 0
+        ) {
           setTargetAreas(fetchedEvent.affectedRiverBasins);
           setTargetMode('river_basin');
         }
 
         // Pre-fill smart defaults for headline & instructions
-        setHeadline(`EMERGENCY ALERT: Severe ${fetchedEvent.hazardType.toUpperCase()} Warning`);
-        setInstructions(
-          `Residents in targeted areas must move to higher ground immediately. Follow official instructions from DMC duty officers.`
+        setHeadline(
+          `${fetchedEvent.hazardType.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())} warning`
         );
+        setInstructions('');
       } else {
         setEventError('Could not load hazard event or prior warning details from Cloud Firestore.');
       }
@@ -195,20 +225,31 @@ export default function WarningComposerScreen() {
   // Recipient Resolution Effect: Triggered when targetMode or targetAreas change
   useEffect(() => {
     let isCurrent = true;
+    setRecipientError('');
     if (targetAreas.length === 0) {
       setResolvedDistricts([]);
       setRecipientCount(0);
+      setResolvingRecipients(false);
       return;
     }
 
     setResolvingRecipients(true);
-    resolveRecipients(targetMode, targetAreas).then((res) => {
-      if (isCurrent) {
-        setResolvedDistricts(res.resolvedDistricts);
-        setRecipientCount(res.recipientCount);
-        setResolvingRecipients(false);
-      }
-    });
+    setRecipientCount(0);
+    resolveRecipients(targetMode, targetAreas)
+      .then(res => {
+        if (isCurrent) {
+          setResolvedDistricts(res.resolvedDistricts);
+          setRecipientCount(res.recipientCount);
+          setResolvingRecipients(false);
+        }
+      })
+      .catch(() => {
+        if (isCurrent) {
+          setRecipientError('Could not check recipients. Try selecting the areas again.');
+          setRecipientCount(0);
+          setResolvingRecipients(false);
+        }
+      });
 
     return () => {
       isCurrent = false;
@@ -217,18 +258,19 @@ export default function WarningComposerScreen() {
 
   // Handle Target Mode Toggle
   const handleTargetModeChange = (mode: TargetMode) => {
+    if (mode === targetMode) return;
     setTargetMode(mode);
     if (!event) {
       setTargetAreas([]);
       return;
     }
     if (mode === 'district') {
-      setTargetAreas(event.affectedDistricts.length > 0 ? event.affectedDistricts : ['Ratnapura']);
+      setTargetAreas(event.affectedDistricts);
     } else {
       setTargetAreas(
         event.affectedRiverBasins && event.affectedRiverBasins.length > 0
           ? event.affectedRiverBasins
-          : ['Kalu River Basin']
+          : []
       );
     }
   };
@@ -236,7 +278,7 @@ export default function WarningComposerScreen() {
   // Toggle Target Area Selection
   const toggleTargetArea = (area: string) => {
     if (targetAreas.includes(area)) {
-      setTargetAreas(targetAreas.filter((a) => a !== area));
+      setTargetAreas(targetAreas.filter(a => a !== area));
     } else {
       setTargetAreas([...targetAreas, area]);
     }
@@ -245,18 +287,22 @@ export default function WarningComposerScreen() {
   // Toggle Delivery Channel Selection
   const toggleDeliveryChannel = (channel: DeliveryChannel) => {
     if (deliveryChannels.includes(channel)) {
-      setDeliveryChannels(deliveryChannels.filter((c) => c !== channel));
+      setDeliveryChannels(deliveryChannels.filter(c => c !== channel));
     } else {
       setDeliveryChannels([...deliveryChannels, channel]);
     }
   };
 
   // Form Validation & Firestore Warning Document Creation
-  const handleDispatch = async () => {
+  const handleDispatch = async (confirmed = false) => {
+    if (!isDmcOfficer) return;
     if (submitting) return; // Prevent accidental double clicks during active dispatch
     setValidationErrors([]);
     const errors: string[] = [];
 
+    if (resolvingRecipients) errors.push('Wait until recipient checking finishes.');
+    if (recipientError)
+      errors.push('Could not check recipients. Select the affected areas again to retry.');
     if (!severity) {
       errors.push('Severity is required. Please select an emergency severity level.');
     }
@@ -283,9 +329,38 @@ export default function WarningComposerScreen() {
       return;
     }
 
+    const eventToCheck = event?.id || eventId || escalatedWarning?.eventId;
+    if (!eventToCheck || event?.status === 'closed') {
+      setValidationErrors(['Select an active hazard event before issuing a warning.']);
+      return;
+    }
+
+    if (!confirmed) {
+      setPreparedPayload({
+        hazardEventTitle: event?.title || escalatedWarning?.hazardEventTitle || 'Hazard event',
+        eventId: event?.id || eventId || escalatedWarning?.eventId || '',
+        hazardType,
+        severity: severity as WarningSeverity,
+        targetMode,
+        targetAreas: [...targetAreas],
+        resolvedDistricts: [...resolvedDistricts],
+        recipientCount,
+        headline: headline.trim(),
+        instructions: instructions.trim(),
+        channels: [...deliveryChannels],
+        deliveryChannels: [...deliveryChannels],
+      });
+      setShowPayloadModal(true);
+      return;
+    }
     setSubmitting(true);
 
     try {
+      const currentEvent = await getHazardEvent(eventToCheck);
+      if (!currentEvent || currentEvent.status !== 'active')
+        throw new Error(
+          'This hazard event has been closed. Return to events and select an active event.'
+        );
       const payload: CreateWarningPayload = {
         eventId: event?.id || eventId || escalatedWarning?.eventId || '',
         hazardEventId: event?.id || eventId || escalatedWarning?.eventId || '',
@@ -303,60 +378,23 @@ export default function WarningComposerScreen() {
         previousWarningId: escalateWarningId || undefined,
       };
 
-      // Build channel execution options based on selected simulation mode
-      let channelOptions: Partial<Record<DeliveryChannel, ChannelExecutionOptions>> | undefined;
-
-      if (simulationMode === 'scenario_a') {
-        channelOptions = {
-          sms: {
-            mockFailure: true,
-            customErrorMessage: 'Cellular SMS Gateway Error: Carrier network timeout / quota exceeded.',
-          },
-        };
-      } else if (simulationMode === 'scenario_b') {
-        channelOptions = {
-          push: {
-            mockFailure: true,
-            customErrorMessage: 'Push Notification Service Gateway unreachable (Connection Timeout).',
-          },
-          sms: {
-            mockFailure: true,
-            customErrorMessage: 'Cellular SMS Gateway Error: Quota exceeded.',
-          },
-          audible: {
-            mockFailure: true,
-            customErrorMessage: 'Audible Siren Control Tower Offline: Grid power failure in target sectors.',
-          },
-        };
-      }
-
-      // Execute End-to-End UC01 Warning Creation & Multi-Channel Dispatch Pipeline:
-      // 1. Validate mandatory information
-      // 2. Resolve recipients again on service layer
-      // 3. Abort if recipient count is zero
-      // 4. Create warning document with status "dispatching"
-      // 5. Run selected delivery channels (sendPush, sendSMS, sendAudible) with fault isolation
-      // 6. Save individual per-channel delivery logs in `deliveryLogs` collection
-      // 7. Calculate final warning status ('delivered', 'partially_failed', or 'failed')
-      // 8. Update warning document status in Cloud Firestore
       const result = await executeWarningDispatchPipeline(
         payload,
         user?.id || user?.email || 'dmc-officer',
-        user?.fullName || 'DMC Duty Officer',
-        channelOptions,
+        user?.fullName || 'DMC Duty Officer'
       );
 
       setPreparedPayload(payload);
-      setCreatedWarningId(result.warningId);
-      setPipelineResult(result);
 
+      setShowPayloadModal(false);
       // Navigate to UC01 Delivery Summary screen
       router.push({
         pathname: '/(app)/warnings/summary',
         params: { warningId: result.warningId, eventId: payload.eventId },
       } as never);
     } catch (err: unknown) {
-      const errorMsg = (err as Error).message || 'Failed to create warning document in Cloud Firestore.';
+      const errorMsg =
+        (err as Error).message || 'Failed to create warning document in Cloud Firestore.';
       setValidationErrors([errorMsg]);
     } finally {
       setSubmitting(false);
@@ -365,1155 +403,425 @@ export default function WarningComposerScreen() {
 
   // List of Available Areas based on Target Mode
   const availableAreaOptions =
-    targetMode === 'district'
-      ? SRI_LANKAN_DISTRICTS
-      : Object.keys(SRI_LANKA_RIVER_BASINS);
+    targetMode === 'district' ? SRI_LANKAN_DISTRICTS : Object.keys(SRI_LANKA_RIVER_BASINS);
 
+  const severityChoices: {
+    value: WarningSeverity;
+    label: string;
+    detail: string;
+    color: string;
+  }[] = [
+    {
+      value: 'advisory',
+      label: 'Advisory',
+      detail: 'Stay informed and take precautions.',
+      color: '#946000',
+    },
+    {
+      value: 'warning',
+      label: 'Warning',
+      detail: 'Prepare to act. Conditions may become dangerous.',
+      color: '#B45C00',
+    },
+    {
+      value: 'evacuation',
+      label: 'Evacuation order',
+      detail: 'People in the affected areas must leave safely.',
+      color: '#D92D3A',
+    },
+  ];
+  const currentSeverity = severityChoices.find(option => option.value === severity);
+  const updatingEvacuation = escalatedWarning?.severity === 'evacuation';
   return (
-    <ScreenContainer>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* Navigation Header */}
-        <View style={styles.navHeader}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-            <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
-          </TouchableOpacity>
-          <View style={styles.navTitleBox}>
-            <Text style={styles.navPill}>DISASTER WARNING COMPOSER</Text>
-            <Text style={styles.navTitle}>Issue Warning</Text>
-          </View>
-        </View>
-
-        {/* Loading State */}
+    <ScreenContainer style={officerScreenStyle} contentStyle={officerShellStyle}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <OfficerHero
+          title={escalatedWarning ? 'Update a warning' : 'Issue a warning'}
+          description="Set the audience, write clear instructions and review before sending."
+          caption="DMC Officer"
+          icon="notifications-outline"
+          onBack={() => router.back()}
+        />
         {loadingEvent ? (
-          <Card style={styles.stateCard}>
-            <ActivityIndicator size="large" color={Colors.accent.primary} />
-            <Text style={styles.stateTitle}>Loading Hazard Event...</Text>
-            <Text style={styles.stateDesc}>Fetching document from Cloud Firestore.</Text>
+          <Card>
+            <ActivityIndicator color={Colors.accent.primary} />
+            <Text style={styles.helper}>Loading event details...</Text>
           </Card>
-        ) : eventError && !event && !escalatedWarning ? (
-          /* Error State */
-          <Card style={styles.errorCard}>
-            <Ionicons name="alert-circle" size={36} color={Colors.danger} />
-            <Text style={styles.errorTitle}>Event Selection Error</Text>
-            <Text style={styles.errorDesc}>{eventError}</Text>
-            <Button title="Back to Events" variant="secondary" size="sm" onPress={() => router.back()} />
+        ) : eventError && ((!event && !escalatedWarning) || event?.status === 'closed') ? (
+          <Card>
+            <Text style={styles.error}>{eventError}</Text>
+            <Button title="Back to events" onPress={() => router.back()} />
+          </Card>
+        ) : !isDmcOfficer ? (
+          <Card>
+            <Text style={styles.title}>Officer access required</Text>
+            <Text style={styles.helper}>Only DMC officers can issue or update warnings.</Text>
+            <Button title="Back to warnings" onPress={() => router.back()} />
           </Card>
         ) : (
-          /* Form Content */
           <>
-            {/* Context Card: Target Event Telemetry */}
-            {event && (
-              <LinearGradient
-                colors={['#1E1B4B', '#0F172A']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.heroBanner}
-              >
-                <Text style={styles.heroSub}>TARGET HAZARD EVENT</Text>
-                <Text style={styles.heroTitle}>{event.title}</Text>
-                <Text style={styles.heroDesc}>{event.description}</Text>
-              </LinearGradient>
-            )}
-
-            {/* Escalation Mode Banner */}
-            {escalatedWarning && (
-              <Card style={styles.escalationBanner}>
-                <View style={styles.escalationBannerHeader}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
-                    <Ionicons name="trending-up" size={18} color="#F59E0B" />
-                    <Text style={styles.escalationBannerTitle}>WARNING ESCALATION MODE</Text>
-                  </View>
-                  <View style={styles.escalationBadge}>
-                    <Text style={styles.escalationBadgeText}>
-                      LINKED #{escalatedWarning.id.slice(-6).toUpperCase()}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={styles.escalationBannerDesc}>
-                  You are raising alert severity for previous warning #{escalatedWarning.id.slice(-6).toUpperCase()}.
-                  Original severity ({escalatedWarning.severity?.toUpperCase()}) elevated to {severity ? severity.toUpperCase() : 'NEW LEVEL'}.
+            <Card style={styles.context}>
+              <Text style={styles.caption}>Related hazard event</Text>
+              <Text style={styles.title}>{event?.title || escalatedWarning?.hazardEventTitle}</Text>
+              <View style={styles.row}>
+                <Ionicons name="warning-outline" size={18} color={Colors.accent.primary} />
+                <Text style={styles.body}>
+                  {hazardType.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())}
                 </Text>
-              </Card>
-            )}
-
-            {/* Validation Errors Notice */}
-            {validationErrors.length > 0 && (
-              <Card style={styles.validationCard}>
-                <View style={styles.validationHeader}>
-                  <Ionicons name="warning-outline" size={20} color={Colors.danger} />
-                  <Text style={styles.validationTitle}>Validation Errors ({validationErrors.length})</Text>
-                </View>
-                {validationErrors.map((err, idx) => (
-                  <Text key={idx} style={styles.validationItem}>• {err}</Text>
+              </View>
+              {escalatedWarning && (
+                <Text style={styles.helper}>
+                  {updatingEvacuation
+                    ? 'This is already an evacuation order, the highest alert level. Update the message or affected areas as needed.'
+                    : `Previous alert: ${severityChoices.find(option => option.value === escalatedWarning.severity)?.label}. Review the proposed severity and update the message.`}
+                </Text>
+              )}
+            </Card>
+            {generalErrors.length > 0 && (
+              <Card>
+                <Text style={styles.title}>Check these details</Text>
+                {generalErrors.map(error => (
+                  <Text key={error} accessibilityRole="alert" style={styles.error}>
+                    {error}
+                  </Text>
                 ))}
               </Card>
             )}
-
-            {/* Form Step 1: Hazard Type (Read-only) */}
-            <Card style={styles.formCard}>
-              <Text style={styles.sectionLabel}>1. HAZARD TYPE (PREFILLED)</Text>
-              <View style={styles.readOnlyBox}>
-                <Ionicons name="flame" size={18} color={Colors.accent.primary} />
-                <Text style={styles.readOnlyText}>{hazardType.toUpperCase()}</Text>
-                <Text style={styles.readOnlyBadge}>READ ONLY</Text>
-              </View>
-              <Text style={styles.helperText}>Prefilled from selected hazard event.</Text>
-            </Card>
-
-            {/* Form Step 2: Severity (Required) */}
-            <Card style={styles.formCard}>
-              <Text style={styles.sectionLabel}>2. SEVERITY LEVEL *</Text>
-              <Select
-                label=""
-                value={severity}
-                onSelect={(val) => setSeverity(val as WarningSeverity)}
-                options={SEVERITY_OPTIONS}
-                placeholder="Select Emergency Severity Level"
-              />
-            </Card>
-
-            {/* Form Step 3: Target Mode (Required) */}
-            <Card style={styles.formCard}>
-              <Text style={styles.sectionLabel}>3. TARGET MODE *</Text>
-              <View style={styles.segmentedRow}>
-                <TouchableOpacity
-                  style={[styles.segmentedBtn, targetMode === 'district' && styles.segmentedBtnActive]}
-                  onPress={() => handleTargetModeChange('district')}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name="map"
-                    size={16}
-                    color={targetMode === 'district' ? Colors.accent.primary : Colors.text.tertiary}
-                  />
-                  <Text style={[styles.segmentedText, targetMode === 'district' && styles.segmentedTextActive]}>
-                    District Mode
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.segmentedBtn, targetMode === 'river_basin' && styles.segmentedBtnActive]}
-                  onPress={() => handleTargetModeChange('river_basin')}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name="water"
-                    size={16}
-                    color={targetMode === 'river_basin' ? '#38BDF8' : Colors.text.tertiary}
-                  />
-                  <Text style={[styles.segmentedText, targetMode === 'river_basin' && styles.segmentedTextActive]}>
-                    River Basin Mode
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </Card>
-
-            {/* Form Step 4: Target Areas (Required) */}
-            <Card style={styles.formCard}>
-              <Text style={styles.sectionLabel}>
-                4. TARGET AREAS ({targetAreas.length} Selected) *
-              </Text>
-              <Text style={styles.helperText}>
-                Select target {targetMode === 'district' ? 'districts' : 'river basins'} for notification.
-              </Text>
-
-              <View style={styles.chipGrid}>
-                {availableAreaOptions.map((area) => {
-                  const isSelected = targetAreas.includes(area);
-                  return (
-                    <TouchableOpacity
-                      key={area}
-                      style={[styles.chip, isSelected && styles.chipSelected]}
-                      onPress={() => toggleTargetArea(area)}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons
-                        name={isSelected ? 'checkmark-circle' : 'add-circle-outline'}
-                        size={14}
-                        color={isSelected ? Colors.accent.primary : Colors.text.tertiary}
-                      />
-                      <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
-                        {area}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </Card>
-
-            {/* Form Step 5: Estimated Recipients (Deduplicated) */}
-            <Card style={styles.formCard}>
-              <Text style={styles.sectionLabel}>5. ESTIMATED RECIPIENT RESOLUTION</Text>
-
-              <View style={styles.recipientBox}>
-                {resolvingRecipients ? (
-                  <View style={styles.resolvingRow}>
-                    <ActivityIndicator size="small" color={Colors.accent.primary} />
-                    <Text style={styles.resolvingText}>Resolving registered recipients...</Text>
-                  </View>
-                ) : (
-                  <>
-                    <View style={styles.countRow}>
-                      <Text style={[styles.countNumber, recipientCount === 0 && { color: Colors.warning }]}>
-                        {recipientCount.toLocaleString()}
-                      </Text>
-                      <Text style={styles.countUnit}>Registered Recipients Resolved</Text>
+            <Card style={styles.section}>
+              <Text style={styles.title}>1. Severity and audience</Text>
+              <Text style={styles.helper}>Choose the action people should take.</Text>
+              <View style={styles.stack}>
+                {severityChoices.map(option => (
+                  <TouchableOpacity
+                    key={option.value}
+                    accessibilityRole="radio"
+                    accessibilityLabel={option.label}
+                    accessibilityState={{ checked: severity === option.value }}
+                    onPress={() => setSeverity(option.value)}
+                    style={[
+                      styles.option,
+                      severity === option.value && {
+                        borderColor: option.color,
+                        backgroundColor: '#F4F8FD',
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={severity === option.value ? 'radio-button-on' : 'radio-button-off'}
+                      size={22}
+                      color={option.color}
+                    />
+                    <View style={styles.flex}>
+                      <Text style={styles.label}>{option.label}</Text>
+                      <Text style={styles.caption}>{option.detail}</Text>
                     </View>
-
-                    {targetAreas.length > 0 && recipientCount === 0 && (
-                      <View style={styles.zeroRecipientsNotice}>
-                        <Ionicons name="warning" size={16} color={Colors.warning} />
-                        <Text style={styles.zeroRecipientsNoticeText}>
-                          No registered recipients found for the selected target area.
-                        </Text>
-                      </View>
-                    )}
-
-                    <Text style={styles.resolvedDistrictsLabel}>
-                      Resolved Administrative Districts ({resolvedDistricts.length}):
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.label}>Choose areas by</Text>
+              <View style={styles.row}>
+                {(['district', 'river_basin'] as const).map(mode => (
+                  <TouchableOpacity
+                    key={mode}
+                    accessibilityRole="radio"
+                    accessibilityLabel={mode === 'district' ? 'District' : 'River basin'}
+                    accessibilityState={{ checked: targetMode === mode }}
+                    onPress={() => handleTargetModeChange(mode)}
+                    style={[styles.mode, targetMode === mode && styles.selected]}
+                  >
+                    <Text style={[styles.label, targetMode === mode && styles.blue]}>
+                      {mode === 'district' ? 'District' : 'River basin'}
                     </Text>
-                    <View style={styles.districtsWrap}>
-                      {resolvedDistricts.length > 0 ? (
-                        resolvedDistricts.map((d) => (
-                          <View key={d} style={styles.distBadge}>
-                            <Text style={styles.distBadgeText}>{d}</Text>
-                          </View>
-                        ))
-                      ) : (
-                        <Text style={styles.noDistrictsText}>No target areas selected yet.</Text>
-                      )}
-                    </View>
-                  </>
-                )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.areaBox}>
+                <Text style={styles.label}>
+                  Affected {targetMode === 'district' ? 'districts' : 'river basins'} (
+                  {targetAreas.length})
+                </Text>
+                <Text style={styles.body}>
+                  {targetAreas.length ? targetAreas.join(', ') : 'No areas selected'}
+                </Text>
+                <Button
+                  title="Choose affected areas"
+                  variant="secondary"
+                  onPress={() => {
+                    setAreaSearch('');
+                    setShowAreas(true);
+                  }}
+                />
+              </View>
+              <FormError
+                message={
+                  !targetAreas.length
+                    ? validationErrors.find(message => message === fieldMessages[2])
+                    : undefined
+                }
+              />
+              <View style={styles.recipients}>
+                <Ionicons name="people-outline" size={23} color={Colors.accent.primary} />
+                <View style={styles.flex}>
+                  <Text style={styles.label}>
+                    {resolvingRecipients
+                      ? 'Checking recipients...'
+                      : `${recipientCount} registered ${recipientCount === 1 ? 'recipient' : 'recipients'}`}
+                  </Text>
+                  <Text style={styles.caption}>
+                    {recipientError || 'Based on the selected areas. Each person is counted once.'}
+                  </Text>
+                </View>
               </View>
             </Card>
-
-            {/* Form Step 6: Warning Headline (Required) */}
-            <Card style={styles.formCard}>
-              <Text style={styles.sectionLabel}>6. WARNING HEADLINE *</Text>
+            <Card style={styles.section}>
+              <Text style={styles.title}>2. Message to the public</Text>
+              <Text style={styles.helper}>State the risk and tell people what to do next.</Text>
               <Input
-                label=""
+                appearance="light"
+                label="Warning headline *"
+                error={
+                  !headline.trim()
+                    ? validationErrors.find(message => message === fieldMessages[0])
+                    : undefined
+                }
+                accessibilityLabel="Warning headline"
                 value={headline}
                 onChangeText={setHeadline}
-                placeholder="e.g. URGENT FLOOD EVACUATION ORDER — KALU RIVER BASIN"
+                multiline
+                scrollEnabled={false}
+                placeholder="For example: Flood warning for Ratnapura"
+                inputStyle={{ minHeight: 64, textAlignVertical: 'top' }}
               />
-            </Card>
-
-            {/* Form Step 7: Instruction Text (Required) */}
-            <Card style={styles.formCard}>
-              <Text style={styles.sectionLabel}>7. INSTRUCTION TEXT *</Text>
               <Input
-                label=""
+                appearance="light"
+                label="Safety instructions *"
+                error={
+                  !instructions.trim()
+                    ? validationErrors.find(message => message === fieldMessages[1])
+                    : undefined
+                }
+                accessibilityLabel="Safety instructions"
                 value={instructions}
                 onChangeText={setInstructions}
                 multiline
-                numberOfLines={4}
-                placeholder="Enter emergency action instructions for citizens in affected areas..."
+                scrollEnabled={false}
+                placeholder="Describe the affected places, safe action and where to get help."
+                inputStyle={{ minHeight: 140, textAlignVertical: 'top' }}
               />
             </Card>
-
-            {/* Form Step 8: Delivery Channels (Required) */}
-            <Card style={styles.formCard}>
-              <Text style={styles.sectionLabel}>
-                8. DELIVERY CHANNELS ({deliveryChannels.length} Selected) *
+            <Card style={styles.section}>
+              <Text style={styles.title}>3. How to send it</Text>
+              <FormError
+                message={
+                  !deliveryChannels.length
+                    ? validationErrors.find(message => message === fieldMessages[3])
+                    : undefined
+                }
+              />
+              <Text style={styles.helper}>Select at least one delivery channel.</Text>
+              <Text style={styles.helper}>
+                Demo delivery: channel results are simulated. No real push notifications, SMS
+                messages or emergency sirens are sent. Issued warnings appear in the app.
               </Text>
-              <Text style={styles.helperText}>Select broadcast delivery channels. At least one required.</Text>
-
-              <View style={styles.channelCol}>
-                {AVAILABLE_CHANNELS.map((ch) => {
-                  const isSelected = deliveryChannels.includes(ch.id);
-                  return (
-                    <TouchableOpacity
-                      key={ch.id}
-                      style={[styles.channelCard, isSelected && styles.channelCardSelected]}
-                      onPress={() => toggleDeliveryChannel(ch.id)}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons
-                        name={ch.icon}
-                        size={22}
-                        color={isSelected ? Colors.accent.primary : Colors.text.tertiary}
-                      />
-                      <View style={styles.channelMeta}>
-                        <Text style={[styles.channelLabel, isSelected && styles.channelLabelSelected]}>
-                          {ch.label}
-                        </Text>
-                        <Text style={styles.channelDesc}>{ch.desc}</Text>
-                      </View>
-                      <Ionicons
-                        name={isSelected ? 'checkbox' : 'square-outline'}
-                        size={20}
-                        color={isSelected ? Colors.accent.primary : Colors.text.tertiary}
-                      />
-                    </TouchableOpacity>
-                  );
-                })}
+              <View style={styles.stack}>
+                {AVAILABLE_CHANNELS.map(channel => (
+                  <TouchableOpacity
+                    key={channel.id}
+                    accessibilityRole="checkbox"
+                    accessibilityLabel={channel.label}
+                    aria-checked={deliveryChannels.includes(channel.id)}
+                    accessibilityState={{ checked: deliveryChannels.includes(channel.id) }}
+                    onPress={() => toggleDeliveryChannel(channel.id)}
+                    style={[
+                      styles.option,
+                      deliveryChannels.includes(channel.id) && styles.selected,
+                    ]}
+                  >
+                    <Ionicons name={channel.icon} size={24} color={Colors.accent.primary} />
+                    <View style={styles.flex}>
+                      <Text style={styles.label}>{channel.label}</Text>
+                      <Text style={styles.caption}>{channel.desc}</Text>
+                    </View>
+                    <Ionicons
+                      name={deliveryChannels.includes(channel.id) ? 'checkbox' : 'square-outline'}
+                      size={23}
+                      color={Colors.accent.primary}
+                    />
+                  </TouchableOpacity>
+                ))}
               </View>
             </Card>
-
-            {/* Development / Simulation Mode Selector */}
-            <Card style={styles.formCard}>
-              <Text style={styles.sectionLabel}>9. DISPATCH SIMULATION MODE (DEVELOPMENT / TEST)</Text>
-              <Text style={styles.helperText}>
-                Select delivery simulation behavior to evaluate fault isolation and error handling.
-              </Text>
-
-              <View style={{ gap: Spacing.sm, marginTop: Spacing.xs }}>
-                <TouchableOpacity
-                  style={[
-                    styles.simOptionCard,
-                    simulationMode === 'standard' && styles.simOptionCardActive,
-                  ]}
-                  onPress={() => setSimulationMode('standard')}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name={simulationMode === 'standard' ? 'radio-button-on' : 'radio-button-off'}
-                    size={18}
-                    color={simulationMode === 'standard' ? Colors.success : Colors.text.tertiary}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.simOptionTitle, { color: Colors.success }]}>
-                      🟢 Standard Delivery (All Channels Succeed)
-                    </Text>
-                    <Text style={styles.simOptionDesc}>
-                      Normal multi-channel broadcast across Push, SMS, and Audible.
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.simOptionCard,
-                    simulationMode === 'scenario_a' && styles.simOptionCardActive,
-                  ]}
-                  onPress={() => setSimulationMode('scenario_a')}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name={simulationMode === 'scenario_a' ? 'radio-button-on' : 'radio-button-off'}
-                    size={18}
-                    color={simulationMode === 'scenario_a' ? Colors.warning : Colors.text.tertiary}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.simOptionTitle, { color: Colors.warning }]}>
-                      🟠 Scenario A: Partial Delivery (Push & Audible Succeed, SMS Fails)
-                    </Text>
-                    <Text style={styles.simOptionDesc}>
-                      Simulates SMS gateway failure while Push & Audible proceed without interruption.
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.simOptionCard,
-                    simulationMode === 'scenario_b' && styles.simOptionCardActive,
-                  ]}
-                  onPress={() => setSimulationMode('scenario_b')}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name={simulationMode === 'scenario_b' ? 'radio-button-on' : 'radio-button-off'}
-                    size={18}
-                    color={simulationMode === 'scenario_b' ? Colors.danger : Colors.text.tertiary}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.simOptionTitle, { color: Colors.danger }]}>
-                      🔴 Scenario B: Complete Failure (Push, SMS & Audible Fail)
-                    </Text>
-                    <Text style={styles.simOptionDesc}>
-                      Simulates complete failure across all channels; warning marked as &apos;Dispatch Failed&apos;.
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              </View>
-            </Card>
-
-            {/* Dispatch Progress Banner */}
-            {submitting && (
-              <Card style={styles.dispatchingProgressCard}>
-                <View style={styles.dispatchingProgressHeader}>
-                  <ActivityIndicator size="small" color={Colors.accent.primary} />
-                  <Text style={styles.dispatchingProgressTitle}>DISPATCH PIPELINE IN PROGRESS</Text>
-                </View>
-                <Text style={styles.dispatchingProgressDesc}>
-                  Creating warning document in Cloud Firestore and executing multi-channel broadcast across Push, SMS, and Audible siren networks...
-                </Text>
-              </Card>
-            )}
-
-            {/* Form Step 9: Dispatch Warning Button */}
-            <View style={styles.dispatchSection}>
-              {isDmcOfficer ? (
-                <Button
-                  title={submitting ? 'DISPATCHING WARNING...' : 'DISPATCH WARNING'}
-                  variant="primary"
-                  loading={submitting}
-                  disabled={submitting || recipientCount <= 0 || targetAreas.length === 0 || resolvingRecipients}
-                  icon={<Ionicons name="send" size={18} color="#FFFFFF" />}
-                  onPress={handleDispatch}
-                  style={styles.dispatchBtn}
-                />
-              ) : (
-                <View style={styles.nonOfficerNotice}>
-                  <Ionicons name="information-circle-outline" size={16} color={Colors.text.tertiary} />
-                  <Text style={styles.nonOfficerText}>
-                    Warning dispatch is restricted to authorized DMC Duty Officers.
-                  </Text>
-                </View>
-              )}
-            </View>
+            <Text style={styles.helper}>
+              You can check all details on the next screen before sending.
+            </Text>
+            <Button
+              title="Review warning"
+              onPress={() => {
+                void handleDispatch();
+              }}
+              disabled={resolvingRecipients || submitting}
+            />
           </>
         )}
       </ScrollView>
-
-      {/* Warning Dispatch Execution Summary Modal */}
-      {preparedPayload && (
-        <FormModal
-          visible={showPayloadModal}
-          onClose={() => setShowPayloadModal(false)}
-          title="Warning Dispatch Execution Summary"
-        >
-          <View style={styles.payloadBox}>
-            <Text style={styles.helperText}>
-              Warning document created in Cloud Firestore and dispatched across selected channels.
-            </Text>
-
-            <View style={styles.payloadHeader}>
-              <Ionicons
-                name={
-                  pipelineResult?.finalStatus === 'delivered'
-                    ? 'checkmark-circle'
-                    : pipelineResult?.finalStatus === 'partially_failed'
-                    ? 'warning'
-                    : 'close-circle'
-                }
-                size={20}
-                color={
-                  pipelineResult?.finalStatus === 'delivered'
-                    ? Colors.success
-                    : pipelineResult?.finalStatus === 'partially_failed'
-                    ? Colors.warning
-                    : Colors.danger
-                }
-              />
-              <Text
-                style={[
-                  styles.payloadHeaderText,
-                  {
-                    color:
-                      pipelineResult?.finalStatus === 'delivered'
-                        ? Colors.success
-                        : pipelineResult?.finalStatus === 'partially_failed'
-                        ? Colors.warning
-                        : Colors.danger,
-                  },
-                ]}
+      <FormModal
+        appearance="light"
+        visible={showAreas}
+        title="Choose affected areas"
+        onClose={() => setShowAreas(false)}
+      >
+        <Input
+          appearance="light"
+          label="Search areas"
+          placeholder="Search a district or river basin"
+          value={areaSearch}
+          onChangeText={setAreaSearch}
+        />
+        <Text style={styles.helper}>
+          {targetAreas.length} selected. Tap an area to select or remove it.
+        </Text>
+        <View style={styles.stack}>
+          {availableAreaOptions
+            .filter(area => area.toLowerCase().includes(areaSearch.toLowerCase()))
+            .map(area => (
+              <TouchableOpacity
+                key={area}
+                accessibilityRole="checkbox"
+                accessibilityLabel={area}
+                accessibilityState={{ checked: targetAreas.includes(area) }}
+                onPress={() => toggleTargetArea(area)}
+                style={[styles.option, targetAreas.includes(area) && styles.selected]}
               >
-                FINAL STATUS:{' '}
-                {pipelineResult?.finalStatus === 'delivered'
-                  ? 'DISPATCHED (SUCCESS)'
-                  : pipelineResult?.finalStatus === 'partially_failed'
-                  ? 'DISPATCHED (PARTIAL DELIVERY)'
-                  : 'DISPATCH FAILED'}
-              </Text>
-            </View>
-
-            {createdWarningId && (
-              <View style={styles.payloadItem}>
-                <Text style={styles.payloadLabel}>Firestore Warning ID:</Text>
-                <Text style={[styles.payloadValue, { color: Colors.accent.primary, fontWeight: '900' }]}>
-                  {createdWarningId}
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.payloadItem}>
-              <Text style={styles.payloadLabel}>Headline:</Text>
-              <Text style={styles.payloadValue}>{preparedPayload.headline}</Text>
-            </View>
-
-            <View style={styles.payloadItem}>
-              <Text style={styles.payloadLabel}>Severity Level:</Text>
-              <Text style={[styles.payloadValue, { color: Colors.danger }]}>
-                {preparedPayload.severity.toUpperCase()}
-              </Text>
-            </View>
-
-            <View style={styles.payloadItem}>
-              <Text style={styles.payloadLabel}>Resolved Recipients:</Text>
-              <Text style={[styles.payloadValue, { color: Colors.success, fontWeight: '900' }]}>
-                {(pipelineResult?.recipientCount || preparedPayload.recipientCount).toLocaleString()} Citizens
-              </Text>
-            </View>
-
-            {/* Per-Channel Breakdown */}
-            {pipelineResult?.channelResults && (
-              <View style={styles.channelResultsBox}>
-                <Text style={styles.channelResultsTitle}>DELIVERY CHANNEL BREAKDOWN</Text>
-                {pipelineResult.channelResults.map((res) => (
-                  <View key={res.channel} style={styles.chResultCard}>
-                    <View style={styles.chResultHeader}>
-                      <Text style={styles.chResultName}>{res.channel.toUpperCase()}</Text>
-                      <View
-                        style={[
-                          styles.chStatusBadge,
-                          res.status === 'Success' || String(res.status).toLowerCase() === 'success'
-                            ? styles.chStatusSuccess
-                            : res.status === 'Partial'
-                            ? styles.chStatusPartial
-                            : styles.chStatusFailed,
-                        ]}
-                      >
-                        <Text style={styles.chStatusText}>{String(res.status).toUpperCase()}</Text>
-                      </View>
-                    </View>
-
-                    <Text style={styles.chResultCounts}>
-                      Delivered: {res.deliveredCount.toLocaleString()} | Failed: {res.failedCount.toLocaleString()}
-                    </Text>
-
-                    {res.errorMessage && (
-                      <Text style={styles.chResultError}>⚠️ {res.errorMessage}</Text>
-                    )}
-                  </View>
-                ))}
-              </View>
-            )}
-
-            <Button
-              title="Close & Return to Command"
-              variant="secondary"
-              onPress={() => {
-                setShowPayloadModal(false);
-                router.back();
-              }}
-              style={{ marginTop: Spacing.md }}
-            />
-          </View>
-        </FormModal>
-      )}
-
-      <MobileNavBar />
+                <Text style={[styles.label, styles.flex]}>{area}</Text>
+                <Ionicons
+                  name={targetAreas.includes(area) ? 'checkbox' : 'square-outline'}
+                  size={24}
+                  color={Colors.accent.primary}
+                />
+              </TouchableOpacity>
+            ))}
+        </View>
+        {!availableAreaOptions.some(area =>
+          area.toLowerCase().includes(areaSearch.toLowerCase())
+        ) && <Text style={styles.helper}>No matching areas. Try a different name.</Text>}
+        <Button
+          title={`Done (${targetAreas.length} selected)`}
+          onPress={() => setShowAreas(false)}
+          style={{ marginTop: 16 }}
+        />
+      </FormModal>
+      <FormModal
+        appearance="light"
+        visible={showPayloadModal}
+        title="Review warning"
+        onClose={() => {
+          if (!submitting) setShowPayloadModal(false);
+        }}
+      >
+        <Text style={styles.title}>{preparedPayload?.headline}</Text>
+        <Text style={[styles.label, { color: currentSeverity?.color, marginTop: 12 }]}>
+          {currentSeverity?.label}
+        </Text>
+        <View style={styles.reviewBlock}>
+          <Text style={styles.label}>Affected areas</Text>
+          <Text style={styles.body}>{preparedPayload?.targetAreas.join(', ')}</Text>
+          <Text style={styles.caption}>
+            {preparedPayload?.recipientCount} registered recipients
+          </Text>
+        </View>
+        <View style={styles.reviewBlock}>
+          <Text style={styles.label}>Safety instructions</Text>
+          <Text style={styles.body}>{preparedPayload?.instructions}</Text>
+        </View>
+        <View style={styles.reviewBlock}>
+          <Text style={styles.label}>Delivery channels</Text>
+          <Text style={styles.body}>
+            {preparedPayload?.channels
+              .map(id => AVAILABLE_CHANNELS.find(channel => channel.id === id)?.label)
+              .join(', ')}
+          </Text>
+        </View>
+        {validationErrors.map(error => (
+          <Text key={error} accessibilityRole="alert" style={styles.error}>
+            {error}
+          </Text>
+        ))}
+        <Text style={styles.helper}>
+          Sending will issue this official warning to the selected audience.
+        </Text>
+        <Button
+          title={submitting ? 'Sending warning...' : 'Send warning'}
+          loading={submitting}
+          onPress={() => {
+            void handleDispatch(true);
+          }}
+        />
+        <Button
+          title="Back to editing"
+          variant="secondary"
+          disabled={submitting}
+          onPress={() => setShowPayloadModal(false)}
+          style={{ marginTop: 10 }}
+        />
+      </FormModal>
+      <MobileNavBar appearance="light" />
     </ScreenContainer>
   );
 }
-
 const styles = StyleSheet.create({
-  scrollContent: {
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.sm,
-    paddingBottom: 110,
-  },
-  dutyDeskHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#0B132B',
-    paddingVertical: Spacing.xs + 2,
-    paddingHorizontal: Spacing.md,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    marginBottom: Spacing.md,
-  },
-  dutyDeskTitleRow: {
+  scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 110 },
+  context: { marginBottom: 16 },
+  section: { marginBottom: 16 },
+  title: { fontSize: 18, lineHeight: 26, fontWeight: '700', color: Colors.text.primary },
+  label: { fontSize: 16, lineHeight: 24, fontWeight: '600', color: Colors.text.primary },
+  body: { fontSize: 16, lineHeight: 24, color: Colors.text.primary },
+  caption: { fontSize: 14, lineHeight: 20, color: Colors.text.secondary },
+  helper: { fontSize: 14, lineHeight: 21, color: Colors.text.secondary, marginVertical: 12 },
+  error: { fontSize: 14, lineHeight: 22, color: Colors.danger, marginVertical: 8 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 12 },
+  flex: { flex: 1, minWidth: 0 },
+  stack: { gap: 10, marginBottom: 16 },
+  option: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.xs,
+    gap: 12,
+    minHeight: 56,
+    padding: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.border.default,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFD',
   },
-  dutyDeskLogoText: {
-    fontSize: FontSize.micro,
-    fontWeight: '900',
-    color: '#38BDF8',
-    letterSpacing: 1,
-  },
-  dutyDeskDivider: {
-    width: 1,
-    height: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  dutyDeskSubText: {
-    fontSize: FontSize.micro,
-    fontWeight: '700',
-    color: Colors.text.tertiary,
-  },
-  dutyDeskStatusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-    borderRadius: BorderRadius.full,
-  },
-  statusDotGreen: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.success,
-  },
-  dutyDeskStatusText: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: Colors.success,
-  },
-  stepperBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    marginBottom: Spacing.lg,
-  },
-  stepperPill: {
+  selected: { backgroundColor: '#EAF2FF', borderColor: Colors.accent.primary },
+  blue: { color: Colors.accent.primary },
+  mode: {
     flex: 1,
-    paddingVertical: Spacing.xs,
-    paddingHorizontal: Spacing.xs,
-    backgroundColor: '#0F172A',
-    borderRadius: BorderRadius.sm,
+    minHeight: 48,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    alignItems: 'center',
-  },
-  stepperPillActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-    borderColor: '#38BDF8',
-  },
-  stepperPillCompleted: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    borderColor: Colors.success,
-  },
-  stepperText: {
-    fontSize: FontSize.micro,
-    fontWeight: '700',
-    color: Colors.text.tertiary,
-  },
-  stepperTextActive: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: '#38BDF8',
-  },
-  stepperTextCompleted: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: Colors.success,
-  },
-  navHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    marginBottom: Spacing.lg,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#0F172A',
-    alignItems: 'center',
+    borderColor: Colors.border.default,
     justifyContent: 'center',
+    alignItems: 'center',
+    padding: 10,
+  },
+  areaBox: {
+    gap: 12,
+    padding: 14,
+    backgroundColor: '#F8FAFD',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: Colors.border.default,
   },
-  navTitleBox: {
-    flex: 1,
-  },
-  navPill: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: Colors.accent.primary,
-    letterSpacing: 0.8,
-  },
-  navTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: '900',
-    color: Colors.text.primary,
-  },
-  heroBanner: {
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(99, 102, 241, 0.35)',
-    marginBottom: Spacing.lg,
-  },
-  heroSub: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: Colors.accent.primary,
-    letterSpacing: 0.8,
-  },
-  heroTitle: {
-    fontSize: FontSize.md,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    marginTop: 2,
-  },
-  heroDesc: {
-    fontSize: FontSize.xs,
-    color: Colors.text.secondary,
-    marginTop: 2,
-  },
-  formCard: {
-    marginBottom: Spacing.lg,
-  },
-  sectionLabel: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: Colors.text.tertiary,
-    letterSpacing: 0.8,
-    marginBottom: Spacing.sm,
-  },
-  readOnlyBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    backgroundColor: '#0F172A',
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  readOnlyText: {
-    fontSize: FontSize.md,
-    fontWeight: '800',
-    color: Colors.text.primary,
-    flex: 1,
-  },
-  readOnlyBadge: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: Colors.text.tertiary,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingVertical: 2,
-    paddingHorizontal: 6,
-    borderRadius: 4,
-  },
-  helperText: {
-    fontSize: FontSize.xs,
-    color: Colors.text.tertiary,
-    marginTop: 6,
-  },
-  segmentedRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  segmentedBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.xs,
-    paddingVertical: Spacing.md,
-    backgroundColor: '#0F172A',
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  segmentedBtnActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.12)',
-    borderColor: Colors.accent.primary,
-  },
-  segmentedText: {
-    fontSize: FontSize.xs,
-    fontWeight: '700',
-    color: Colors.text.tertiary,
-  },
-  segmentedTextActive: {
-    color: Colors.accent.primary,
-    fontWeight: '900',
-  },
-  chipGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.xs,
-    marginTop: Spacing.sm,
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#0F172A',
-    paddingVertical: 6,
-    paddingHorizontal: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  chipSelected: {
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-    borderColor: Colors.accent.primary,
-  },
-  chipText: {
-    fontSize: FontSize.xs,
-    color: Colors.text.secondary,
-  },
-  chipTextSelected: {
-    color: Colors.accent.primary,
-    fontWeight: '800',
-  },
-  recipientBox: {
-    backgroundColor: '#0F172A',
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  resolvingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.sm,
-  },
-  resolvingText: {
-    fontSize: FontSize.xs,
-    color: Colors.text.tertiary,
-  },
-  countRow: {
-    marginBottom: Spacing.sm,
-  },
-  countNumber: {
-    fontSize: FontSize.xxl,
-    fontWeight: '900',
-    color: Colors.success,
-  },
-  countUnit: {
-    fontSize: FontSize.xs,
-    color: Colors.text.secondary,
-    fontWeight: '700',
-  },
-  resolvedDistrictsLabel: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: Colors.text.tertiary,
-    marginTop: Spacing.xs,
-    marginBottom: 6,
-  },
-  districtsWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  distBadge: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-    borderRadius: BorderRadius.full,
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-  },
-  distBadgeText: {
-    fontSize: FontSize.xs,
-    color: Colors.success,
-    fontWeight: '700',
-  },
-  noDistrictsText: {
-    fontSize: FontSize.xs,
-    color: Colors.text.tertiary,
-    fontStyle: 'italic',
-  },
-  channelCol: {
-    gap: Spacing.sm,
-    marginTop: Spacing.xs,
-  },
-  channelCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    backgroundColor: '#0F172A',
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  channelCardSelected: {
-    backgroundColor: 'rgba(56, 189, 248, 0.12)',
-    borderColor: Colors.accent.primary,
-  },
-  channelMeta: {
-    flex: 1,
-  },
-  channelLabel: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    color: Colors.text.secondary,
-  },
-  channelLabelSelected: {
-    color: '#FFFFFF',
-    fontWeight: '900',
-  },
-  channelDesc: {
-    fontSize: FontSize.xs,
-    color: Colors.text.tertiary,
-    marginTop: 2,
-  },
-  validationCard: {
-    borderColor: 'rgba(239, 68, 68, 0.4)',
-    backgroundColor: 'rgba(239, 68, 68, 0.08)',
-    marginBottom: Spacing.lg,
-  },
-  validationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    marginBottom: Spacing.xs,
-  },
-  validationTitle: {
-    fontSize: FontSize.xs,
-    fontWeight: '900',
-    color: Colors.danger,
-  },
-  validationItem: {
-    fontSize: FontSize.xs,
-    color: '#FCA5A5',
-    lineHeight: 18,
-    marginTop: 2,
-  },
-  dispatchSection: {
-    marginTop: Spacing.md,
-    marginBottom: Spacing.xxl,
-  },
-  dispatchBtn: {
-    width: '100%',
-  },
-  nonOfficerNotice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    padding: Spacing.md,
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  nonOfficerText: {
-    fontSize: FontSize.xs,
-    color: Colors.text.tertiary,
-  },
-  stateCard: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing.xxxl,
-    marginVertical: Spacing.xl,
-  },
-  stateTitle: {
-    fontSize: FontSize.md,
-    fontWeight: '700',
-    color: Colors.text.primary,
-    marginTop: Spacing.md,
-  },
-  stateDesc: {
-    fontSize: FontSize.xs,
-    color: Colors.text.tertiary,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  errorCard: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing.xxxl,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
-    marginVertical: Spacing.xl,
-  },
-  errorTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: '900',
-    color: Colors.danger,
-    marginTop: Spacing.md,
-  },
-  errorDesc: {
-    fontSize: FontSize.xs,
-    color: Colors.text.secondary,
-    textAlign: 'center',
-    marginVertical: Spacing.md,
-  },
-  payloadBox: {
-    gap: Spacing.xs,
-  },
-  payloadHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    marginBottom: Spacing.md,
-    paddingBottom: Spacing.xs,
+  recipients: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 },
+  reviewBlock: {
+    gap: 8,
+    marginTop: 18,
+    paddingBottom: 18,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  payloadHeaderText: {
-    fontSize: FontSize.xs,
-    fontWeight: '900',
-    color: Colors.success,
-  },
-  payloadItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: Spacing.md,
-    paddingVertical: 4,
-  },
-  payloadLabel: {
-    fontSize: FontSize.xs,
-    color: Colors.text.tertiary,
-    fontWeight: '700',
-  },
-  payloadValue: {
-    fontSize: FontSize.xs,
-    color: Colors.text.primary,
-    fontWeight: '800',
-    flex: 1,
-    textAlign: 'right',
-  },
-  channelResultsBox: {
-    marginTop: Spacing.md,
-    gap: Spacing.xs,
-  },
-  channelResultsTitle: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: Colors.text.tertiary,
-    letterSpacing: 0.8,
-    marginBottom: 4,
-  },
-  chResultCard: {
-    backgroundColor: '#0F172A',
-    borderRadius: BorderRadius.md,
-    padding: Spacing.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  chResultHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  chResultName: {
-    fontSize: FontSize.xs,
-    fontWeight: '800',
-    color: Colors.text.primary,
-  },
-  chStatusBadge: {
-    paddingVertical: 2,
-    paddingHorizontal: 6,
-    borderRadius: 4,
-  },
-  chStatusSuccess: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-  },
-  chStatusPartial: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-  },
-  chStatusFailed: {
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-  },
-  chStatusText: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: Colors.text.primary,
-  },
-  chResultCounts: {
-    fontSize: FontSize.xs,
-    color: Colors.text.secondary,
-  },
-  chResultError: {
-    fontSize: FontSize.xs,
-    color: Colors.danger,
-    marginTop: 4,
-  },
-  zeroRecipientsNotice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.35)',
-    marginVertical: Spacing.xs,
-  },
-  zeroRecipientsNoticeText: {
-    fontSize: FontSize.xs,
-    fontWeight: '700',
-    color: Colors.warning,
-    flex: 1,
-  },
-  simOptionCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.sm,
-    backgroundColor: '#0F172A',
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  simOptionCardActive: {
-    borderColor: Colors.accent.primary,
-    backgroundColor: 'rgba(99, 102, 241, 0.08)',
-  },
-  simOptionTitle: {
-    fontSize: FontSize.xs,
-    fontWeight: '800',
-  },
-  simOptionDesc: {
-    fontSize: FontSize.micro,
-    color: Colors.text.tertiary,
-    marginTop: 2,
-  },
-  dispatchingProgressCard: {
-    backgroundColor: 'rgba(99, 102, 241, 0.12)',
-    borderColor: 'rgba(99, 102, 241, 0.35)',
-    borderWidth: 1,
-    marginBottom: Spacing.md,
-  },
-  dispatchingProgressHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginBottom: 4,
-  },
-  dispatchingProgressTitle: {
-    fontSize: FontSize.xs,
-    fontWeight: '800',
-    color: Colors.accent.primary,
-    letterSpacing: 0.5,
-  },
-  dispatchingProgressDesc: {
-    fontSize: FontSize.xs,
-    color: Colors.text.secondary,
-    lineHeight: 18,
-  },
-  escalationBanner: {
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-    borderColor: 'rgba(245, 158, 11, 0.4)',
-    borderWidth: 1,
-    marginBottom: Spacing.md,
-  },
-  escalationBannerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.xs,
-  },
-  escalationBannerTitle: {
-    fontSize: FontSize.xs,
-    fontWeight: '900',
-    color: '#F59E0B',
-    letterSpacing: 0.8,
-  },
-  escalationBadge: {
-    backgroundColor: 'rgba(245, 158, 11, 0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.full,
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.4)',
-  },
-  escalationBadgeText: {
-    fontSize: FontSize.micro,
-    fontWeight: '800',
-    color: '#FCD34D',
-  },
-  escalationBannerDesc: {
-    fontSize: FontSize.xs,
-    color: Colors.text.secondary,
-    lineHeight: 18,
+    borderBottomColor: Colors.border.default,
   },
 });

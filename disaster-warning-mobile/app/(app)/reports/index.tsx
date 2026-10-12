@@ -16,40 +16,38 @@ import {
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenContainer } from '@/components/ScreenContainer';
-import { ReportCard } from '@/components/ReportCard';
-import { ReportDetailModal } from '@/components/ReportDetailModal';
+import { CommunityReportCard as ReportCard } from '@/components/CommunityReportCard';
+import { ReportDetailView } from '@/components/ReportDetailView';
+import { FormModal } from '@/components/FormModal';
+import { ReportScreenHero } from '@/components/ReportScreenHero';
+import { MobileNavBar } from '@/components/MobileNavBar';
+import {
+  OfficerColors as Colors,
+  OfficerFontSize as FontSize,
+  officerScreenStyle,
+  officerShellStyle,
+} from '@/components/OfficerUi';
+import { CommunityReports } from '@/components/CommunityReports';
+import { isCommunityRole } from '@/constants/navigation';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { InAppNotificationBanner } from '@/components/InAppNotificationBanner';
 import { EmptyState } from '@/components/EmptyState';
-import { Colors, BorderRadius, Spacing, FontSize } from '@/constants/colors';
+import { BorderRadius, Spacing } from '@/constants/colors';
 import { getReportPermissions } from '@/constants/reportPermissions';
 import { useAuth } from '@/hooks/useAuth';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { useReportNotifications } from '@/hooks/useReportNotifications';
-import {
-  getMyReports,
-  getPendingReports,
-  getAllReports,
-  verifyReport,
-  rejectReport,
-  requestAdditionalInfo,
-  submitAdditionalInfo,
-} from '@/services/groundReportService';
-import { getActiveEvents } from '@/services/hazardEventService';
+import { getMyReports, getPendingReports, getAllReports } from '@/services/groundReportService';
 import { getOfflineQueueCount } from '@/services/offlineQueueService';
-import {
-  subscribeToSyncProgress,
-  triggerSyncNow,
-} from '@/services/offlineSyncManager';
+import { subscribeToSyncProgress, triggerSyncNow } from '@/services/offlineSyncManager';
 import type { GroundReport } from '@/types/groundReport';
-import type { HazardEvent } from '@/types/resources';
 
 type OfficerTab = 'pending' | 'info_requested' | 'all';
 type CitizenTab = 'verified' | 'my_reports';
 
 const OFFICER_TABS: { key: OfficerTab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'pending', label: 'Pending', icon: 'time-outline' },
-  { key: 'info_requested', label: 'Info Req.', icon: 'help-circle-outline' },
+  { key: 'info_requested', label: 'Needs info', icon: 'help-circle-outline' },
   { key: 'all', label: 'All', icon: 'list-outline' },
 ];
 
@@ -59,6 +57,11 @@ const CITIZEN_TABS: { key: CitizenTab; label: string; icon: keyof typeof Ionicon
 ];
 
 export default function ReportListScreen() {
+  const { state } = useAuth();
+  return isCommunityRole(state.user?.role) ? <CommunityReports /> : <StaffReportListScreen />;
+}
+
+function StaffReportListScreen() {
   const { state: authState } = useAuth();
   const router = useRouter();
   const params = useLocalSearchParams<{ tab?: string }>();
@@ -70,35 +73,36 @@ export default function ReportListScreen() {
   const isDistrictOfficer = user?.role === 'district_officer';
 
   const { isOffline } = useNetworkStatus();
-  const {
-    notifications,
-    activeNotification,
-    dismissNotification,
-    refreshNotifications,
-  } = useReportNotifications();
+  const { notifications, activeNotification, dismissNotification, refreshNotifications } =
+    useReportNotifications();
 
   const [reports, setReports] = useState<GroundReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<OfficerTab>('pending');
   const [citizenTab, setCitizenTab] = useState<CitizenTab>(
-    params.tab === 'my_reports' || params.tab === 'my' ? 'my_reports' : 'verified',
+    params.tab === 'my_reports' || params.tab === 'my' ? 'my_reports' : 'verified'
   );
   const [offlineCount, setOfflineCount] = useState(0);
 
   // Sync tab state if query parameter changes
   useEffect(() => {
+    if (
+      isOfficer &&
+      (params.tab === 'pending' || params.tab === 'info_requested' || params.tab === 'all')
+    ) {
+      setActiveTab(params.tab);
+    }
     if (params.tab === 'my_reports' || params.tab === 'my') {
       setCitizenTab('my_reports');
     } else if (params.tab === 'verified') {
       setCitizenTab('verified');
     }
-  }, [params.tab]);
+  }, [params.tab, isOfficer]);
 
   // Detail modal state
   const [selectedReport, setSelectedReport] = useState<GroundReport | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [activeEvents, setActiveEvents] = useState<HazardEvent[]>([]);
 
   const fetchReports = useCallback(async () => {
     if (!user) return;
@@ -143,24 +147,16 @@ export default function ReportListScreen() {
     }
   }, []);
 
-  const fetchActiveEvents = useCallback(async () => {
-    try {
-      const events = await getActiveEvents();
-      setActiveEvents(events);
-    } catch {
-      // non-fatal
-    }
-  }, []);
-
   useEffect(() => {
     let mounted = true;
     setLoading(true);
-    Promise.all([fetchReports(), fetchOfflineCount(), fetchActiveEvents()])
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
-    return () => { mounted = false; };
-  }, [fetchReports, fetchOfflineCount, fetchActiveEvents]);
+    Promise.all([fetchReports(), fetchOfflineCount()]).finally(() => {
+      if (mounted) setLoading(false);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [fetchReports, fetchOfflineCount]);
 
   // Re-poll for updates and unread status notifications when screen gains focus
   useFocusEffect(
@@ -168,12 +164,12 @@ export default function ReportListScreen() {
       fetchReports();
       fetchOfflineCount();
       refreshNotifications();
-    }, [fetchReports, fetchOfflineCount, refreshNotifications]),
+    }, [fetchReports, fetchOfflineCount, refreshNotifications])
   );
 
   // Subscribe to background synchronization events
   useEffect(() => {
-    const unsubscribe = subscribeToSyncProgress((event) => {
+    const unsubscribe = subscribeToSyncProgress(event => {
       if (event.state === 'completed' || event.state === 'syncing') {
         fetchReports();
         fetchOfflineCount();
@@ -184,18 +180,13 @@ export default function ReportListScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([
-      fetchReports(),
-      fetchOfflineCount(),
-      fetchActiveEvents(),
-      refreshNotifications(),
-    ]);
+    await Promise.all([fetchReports(), fetchOfflineCount(), refreshNotifications()]);
     setRefreshing(false);
-  }, [fetchReports, fetchOfflineCount, fetchActiveEvents, refreshNotifications]);
+  }, [fetchReports, fetchOfflineCount, refreshNotifications]);
 
   const handleReportPress = (report: GroundReport) => {
     // If report has an unacknowledged notification, dismiss it as seen
-    const matchingNotif = notifications.find((n) => n.reportId === report.id);
+    const matchingNotif = notifications.find(n => n.reportId === report.id);
     if (matchingNotif) {
       dismissNotification(matchingNotif);
     }
@@ -203,40 +194,8 @@ export default function ReportListScreen() {
     setModalVisible(true);
   };
 
-  const handleVerify = async (
-    reportId: string,
-    hazardEventId?: string | null,
-    hazardEventTitle?: string | null,
-    decisionNote?: string,
-  ) => {
-    if (!user) return;
-    await verifyReport(reportId, { uid: user.id, name: user.fullName }, {
-      hazardEventId,
-      hazardEventTitle,
-      decisionNote,
-    });
-    await fetchReports();
-  };
-
-  const handleReject = async (reportId: string, reason: string) => {
-    if (!user) return;
-    await rejectReport(reportId, { uid: user.id, name: user.fullName }, reason);
-    await fetchReports();
-  };
-
-  const handleRequestInfo = async (reportId: string, message: string) => {
-    if (!user) return;
-    await requestAdditionalInfo(reportId, { uid: user.id, name: user.fullName }, message);
-    await fetchReports();
-  };
-
-  const handleSubmitAdditionalInfo = async (reportId: string, text: string) => {
-    await submitAdditionalInfo(reportId, text);
-    await fetchReports();
-  };
-
   const renderReportItem = ({ item }: { item: GroundReport }) => {
-    const isNew = !isOfficer && notifications.some((n) => n.reportId === item.id);
+    const isNew = !isOfficer && notifications.some(n => n.reportId === item.id);
     return (
       <ReportCard
         report={item}
@@ -250,35 +209,29 @@ export default function ReportListScreen() {
   const headerTitle = isOfficer
     ? 'Verification Queue'
     : isDistrictOfficer
-    ? 'District Ground Observations'
-    : citizenTab === 'verified'
-    ? 'Verified Ground Observations'
-    : 'My Ground Reports';
+      ? 'District Ground Observations'
+      : citizenTab === 'verified'
+        ? 'Verified Ground Observations'
+        : 'My Ground Reports';
 
   const headerSubtitle = isOfficer
-    ? `${reports.length} report${reports.length !== 1 ? 's' : ''} awaiting review`
+    ? `${reports.length} report${reports.length !== 1 ? 's' : ''} ${activeTab === 'pending' ? 'awaiting review' : activeTab === 'info_requested' ? 'awaiting more information' : 'in all categories'}`
     : isDistrictOfficer
-    ? `${reports.length} verified observation${reports.length !== 1 ? 's' : ''} • Situational Feed`
-    : citizenTab === 'verified'
-    ? `${reports.length} verified report${reports.length !== 1 ? 's' : ''} • Official Public Feed`
-    : `${reports.length} submitted report${reports.length !== 1 ? 's' : ''}`;
+      ? `${reports.length} verified observation${reports.length !== 1 ? 's' : ''} • Situational Feed`
+      : citizenTab === 'verified'
+        ? `${reports.length} verified report${reports.length !== 1 ? 's' : ''} • Official Public Feed`
+        : `${reports.length} submitted report${reports.length !== 1 ? 's' : ''}`;
 
   return (
-    <ScreenContainer>
+    <ScreenContainer style={officerScreenStyle} contentStyle={officerShellStyle}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => router.push('/(app)')}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="chevron-back" size={20} color={Colors.text.secondary} />
-        </TouchableOpacity>
-        <View>
-          <Text style={styles.headerTitle}>{headerTitle}</Text>
-          <Text style={styles.headerSubtitle}>{headerSubtitle}</Text>
-        </View>
-      </View>
+      <ReportScreenHero
+        title={headerTitle}
+        description={headerSubtitle}
+        caption="Ground reports"
+        icon="shield-checkmark-outline"
+        onBack={() => router.push('/(app)')}
+      />
 
       {/* In-App Status Notification Feedback Banner */}
       {activeNotification && !isOfficer && (
@@ -293,20 +246,22 @@ export default function ReportListScreen() {
       )}
 
       {/* Offline Indicator */}
-      <OfflineIndicator
-        isOffline={isOffline}
-        queueCount={offlineCount}
-        onPressSync={async () => {
-          await triggerSyncNow();
-          await Promise.all([fetchReports(), fetchOfflineCount()]);
-        }}
-        onPressQueue={() => router.push('/(app)/reports/offline-queue' as never)}
-      />
+      {!isOfficer && (
+        <OfflineIndicator
+          isOffline={isOffline}
+          queueCount={offlineCount}
+          onPressSync={async () => {
+            await triggerSyncNow();
+            await Promise.all([fetchReports(), fetchOfflineCount()]);
+          }}
+          onPressQueue={() => router.push('/(app)/reports/offline-queue' as never)}
+        />
+      )}
 
       {/* Officer Tabs */}
       {isOfficer && (
         <View style={styles.tabBar}>
-          {OFFICER_TABS.map((tab) => (
+          {OFFICER_TABS.map(tab => (
             <TouchableOpacity
               key={tab.key}
               style={[styles.tabItem, activeTab === tab.key && styles.tabItemActive]}
@@ -329,7 +284,7 @@ export default function ReportListScreen() {
       {/* Citizen & Volunteer Tabs: Verified Feed vs My Reports */}
       {!isOfficer && !isDistrictOfficer && (
         <View style={styles.tabBar}>
-          {CITIZEN_TABS.map((tab) => (
+          {CITIZEN_TABS.map(tab => (
             <TouchableOpacity
               key={tab.key}
               style={[styles.tabItem, citizenTab === tab.key && styles.tabItemActive]}
@@ -358,7 +313,7 @@ export default function ReportListScreen() {
       ) : (
         <FlatList
           data={reports}
-          keyExtractor={(item) => item.id}
+          keyExtractor={item => item.id}
           renderItem={renderReportItem}
           contentContainerStyle={[
             styles.listContent,
@@ -376,24 +331,25 @@ export default function ReportListScreen() {
           }
           ListEmptyComponent={
             <EmptyState
+              appearance="light"
               iconName="document-text-outline"
               title={
                 isOfficer
                   ? 'Queue Clear'
                   : isDistrictOfficer
-                  ? 'No Verified Observations'
-                  : citizenTab === 'verified'
-                  ? 'No Verified Reports'
-                  : 'No Reports Yet'
+                    ? 'No Verified Observations'
+                    : citizenTab === 'verified'
+                      ? 'No Verified Reports'
+                      : 'No Reports Yet'
               }
               message={
                 isOfficer
                   ? 'No ground reports in this category awaiting verification.'
                   : isDistrictOfficer
-                  ? `No verified hazard observations currently recorded for ${user?.district || 'this operational sector'}.`
-                  : citizenTab === 'verified'
-                  ? 'No ground hazard observations have been officially verified by DMC Duty Officers yet.'
-                  : 'Submit your first ground hazard observation to help the Disaster Management Centre respond faster.'
+                    ? `No verified hazard observations currently recorded for ${user?.district || 'this operational sector'}.`
+                    : citizenTab === 'verified'
+                      ? 'No ground hazard observations have been officially verified by DMC Duty Officers yet.'
+                      : 'Submit your first ground hazard observation to help the Disaster Management Centre respond faster.'
               }
             />
           }
@@ -413,30 +369,30 @@ export default function ReportListScreen() {
       )}
 
       {/* Report Detail Modal */}
-      <ReportDetailModal
+      <FormModal
+        appearance="light"
         visible={modalVisible}
-        report={selectedReport}
+        title="Report details"
+        scrollable={false}
         onClose={() => {
           setModalVisible(false);
           setSelectedReport(null);
+          void fetchReports();
         }}
-        onOpenFullScreen={(id) => {
-          setModalVisible(false);
-          setSelectedReport(null);
-          router.push(`/(app)/reports/${id}` as never);
-        }}
-        onOpenLinkedEvent={(eventId) => {
-          setModalVisible(false);
-          setSelectedReport(null);
-          router.push(`/(app)/warnings/${eventId}` as never);
-        }}
-        isOfficer={isOfficer}
-        activeEvents={activeEvents}
-        onVerify={handleVerify}
-        onReject={handleReject}
-        onRequestInfo={handleRequestInfo}
-        onSubmitAdditionalInfo={handleSubmitAdditionalInfo}
-      />
+      >
+        {selectedReport && (
+          <ReportDetailView
+            reportId={selectedReport.id}
+            embedded
+            onClose={() => {
+              setModalVisible(false);
+              setSelectedReport(null);
+              void fetchReports();
+            }}
+          />
+        )}
+      </FormModal>
+      <MobileNavBar appearance="light" />
     </ScreenContainer>
   );
 }
@@ -454,7 +410,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: '#DFE7F1',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -471,9 +427,12 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     flexDirection: 'row',
-    marginHorizontal: Spacing.xl,
+    marginHorizontal: 18,
     marginBottom: Spacing.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: '#FFFFFF',
+    marginTop: -20,
+    borderWidth: 1,
+    borderColor: '#DFE7F1',
     borderRadius: BorderRadius.md,
     padding: 3,
   },
@@ -483,13 +442,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 5,
+    minHeight: 48,
+    flexWrap: 'wrap',
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.sm,
   },
   tabItemActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.14)',
+    backgroundColor: '#EAF2FF',
     borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.3)',
+    borderColor: '#BDD5FF',
   },
   tabLabel: {
     fontSize: FontSize.xs,
@@ -511,7 +472,6 @@ const styles = StyleSheet.create({
     color: Colors.text.tertiary,
   },
   listContent: {
-    paddingHorizontal: Spacing.xl,
     paddingBottom: 120,
   },
   emptyListContent: {

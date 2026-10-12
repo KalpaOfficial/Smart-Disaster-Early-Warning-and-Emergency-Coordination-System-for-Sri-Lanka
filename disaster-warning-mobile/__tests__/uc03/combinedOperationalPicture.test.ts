@@ -9,6 +9,7 @@
  * - Multi-organisation aggregation (Government, Armed Forces, NGOs, Private Donors)
  */
 import type { Shelter, RescueTeam, ReliefSupply, HazardEvent } from '@/types/resources';
+import { resourceOverview } from '@/utils/resourceOverview';
 
 describe('UC03: Combined Operational Picture Telemetry Aggregations', () => {
   const mockShelters: Shelter[] = [
@@ -19,7 +20,7 @@ describe('UC03: Combined Operational Picture Telemetry Aggregations', () => {
       address: 'Main St',
       district: 'Ratnapura',
       latitude: 6.68,
-      longitude: 80.40,
+      longitude: 80.4,
       capacity: 300,
       currentOccupancy: 210, // 70%
       facilities: ['Water', 'Kitchen'],
@@ -232,17 +233,53 @@ describe('UC03: Combined Operational Picture Telemetry Aggregations', () => {
   ];
 
   describe('Emergency Shelters Operational Aggregation', () => {
+    it('handles empty resources without invalid capacity percentages', () => {
+      expect(resourceOverview({ shelters: [], teams: [], supplies: [] })).toMatchObject({
+        totalCapacity: 0,
+        totalOccupancy: 0,
+        occupancyPercentage: 0,
+        remainingSupplyItems: 0,
+      });
+    });
+    it('filters event allocations and district standby resources by the selected event', () => {
+      const event = { id: 'event-monsoon-2026', affectedDistricts: ['Ratnapura'] } as HazardEvent;
+      const picture = resourceOverview(
+        {
+          shelters: [
+            ...mockShelters,
+            { ...mockShelters[0], id: 'old-event', hazardEventId: 'old-event' },
+          ],
+          teams: mockTeams,
+          supplies: mockSupplies,
+        },
+        event
+      );
+      expect(picture.shelters.map(s => s.id)).toEqual(['s-1', 's-2']);
+      expect(picture.shelters.some(s => s.id === 'old-event')).toBe(false);
+    });
+    it('excludes withdrawn stock from availability without counting withdrawal as distribution', () => {
+      const picture = resourceOverview({
+        shelters: [],
+        teams: [],
+        supplies: [
+          {
+            ...mockSupplies[0],
+            totalQuantity: 100,
+            remainingQuantity: 80,
+            availability: 'withdrawn',
+          },
+          { ...mockSupplies[1], totalQuantity: 200, remainingQuantity: 150 },
+        ],
+      });
+      expect(picture.totalSupplyItems).toBe(200);
+      expect(picture.remainingSupplyItems).toBe(150);
+      expect(picture.distributedSupplyItems).toBe(70);
+    });
     it('aggregates active shelters, total capacity, and occupancy faithfully', () => {
       // Active shelters include both 'active' and 'over_capacity'
-      const activeShelters = mockShelters.filter(
-        (s) => s.status === 'active' || s.status === 'over_capacity',
-      );
+      const { activeShelters, totalCapacity, totalOccupancy, occupancyPercentage } =
+        resourceOverview({ shelters: mockShelters, teams: mockTeams, supplies: mockSupplies });
       expect(activeShelters).toHaveLength(2);
-
-      const totalCapacity = activeShelters.reduce((acc, s) => acc + s.capacity, 0);
-      const totalOccupancy = activeShelters.reduce((acc, s) => acc + s.currentOccupancy, 0);
-      const occupancyPercentage =
-        totalCapacity > 0 ? Math.round((totalOccupancy / totalCapacity) * 100) : 0;
 
       expect(totalCapacity).toBe(450); // 300 + 150
       expect(totalOccupancy).toBe(375); // 210 + 165
@@ -250,7 +287,7 @@ describe('UC03: Combined Operational Picture Telemetry Aggregations', () => {
     });
 
     it('identifies and flags over-capacity facilities requiring emergency decanting', () => {
-      const overCapacityShelters = mockShelters.filter((s) => s.status === 'over_capacity');
+      const overCapacityShelters = mockShelters.filter(s => s.status === 'over_capacity');
       expect(overCapacityShelters).toHaveLength(1);
       expect(overCapacityShelters[0].name).toBe('Kalutara Temple Hall');
       expect(overCapacityShelters[0].currentOccupancy).toBe(165);
@@ -258,7 +295,7 @@ describe('UC03: Combined Operational Picture Telemetry Aggregations', () => {
     });
 
     it('identifies standby registered shelters ready for immediate activation', () => {
-      const registeredShelters = mockShelters.filter((s) => s.status === 'registered');
+      const registeredShelters = mockShelters.filter(s => s.status === 'registered');
       expect(registeredShelters).toHaveLength(1);
       expect(registeredShelters[0].name).toBe('Galle Stadium Shelter');
       expect(registeredShelters[0].capacity).toBe(500);
@@ -267,20 +304,26 @@ describe('UC03: Combined Operational Picture Telemetry Aggregations', () => {
 
   describe('Tactical Rescue Teams Operational Aggregation', () => {
     it('aggregates actively deployed rescue units (dispatched, en_route, on_site)', () => {
-      const deployedTeams = mockTeams.filter((t) =>
-        ['dispatched', 'en_route', 'on_site'].includes(t.status),
-      );
+      const { deployedTeams } = resourceOverview({
+        shelters: mockShelters,
+        teams: mockTeams,
+        supplies: mockSupplies,
+      });
       expect(deployedTeams).toHaveLength(3); // Navy on_site, Army en_route, Red Cross dispatched
     });
 
     it('aggregates available reserve units in tactical pool ready for deployment', () => {
-      const availableTeams = mockTeams.filter((t) => t.status === 'available');
+      const { availableTeams } = resourceOverview({
+        shelters: mockShelters,
+        teams: mockTeams,
+        supplies: mockSupplies,
+      });
       expect(availableTeams).toHaveLength(1); // Air Force Helicopter SAR
       expect(availableTeams[0].name).toContain('Helicopter SAR');
     });
 
     it('aggregates completed mission units that can be recycled to available pool', () => {
-      const completedTeams = mockTeams.filter((t) => t.status === 'completed');
+      const completedTeams = mockTeams.filter(t => t.status === 'completed');
       expect(completedTeams).toHaveLength(1);
       expect(completedTeams[0].name).toBe('Community Boat Rescue Volunteer Unit');
     });
@@ -288,9 +331,11 @@ describe('UC03: Combined Operational Picture Telemetry Aggregations', () => {
 
   describe('Relief Supply Inventory & Distribution Aggregation', () => {
     it('aggregates warehouse inventory quantities and distribution balances', () => {
-      const totalUnitsStocked = mockSupplies.reduce((acc, s) => acc + s.totalQuantity, 0);
-      const totalUnitsRemaining = mockSupplies.reduce((acc, s) => acc + s.remainingQuantity, 0);
-      const totalUnitsDispatched = totalUnitsStocked - totalUnitsRemaining;
+      const {
+        totalSupplyItems: totalUnitsStocked,
+        remainingSupplyItems: totalUnitsRemaining,
+        distributedSupplyItems: totalUnitsDispatched,
+      } = resourceOverview({ shelters: mockShelters, teams: mockTeams, supplies: mockSupplies });
 
       expect(totalUnitsStocked).toBe(20500); // 10000 + 8000 + 500 + 2000
       expect(totalUnitsRemaining).toBe(12580); // 6500 + 4200 + 380 + 1500
@@ -298,9 +343,9 @@ describe('UC03: Combined Operational Picture Telemetry Aggregations', () => {
     });
 
     it('groups relief supplies by essential commodity category', () => {
-      const foodSupplies = mockSupplies.filter((s) => s.type === 'food');
-      const waterSupplies = mockSupplies.filter((s) => s.type === 'water');
-      const medicalSupplies = mockSupplies.filter((s) => s.type === 'medicine');
+      const foodSupplies = mockSupplies.filter(s => s.type === 'food');
+      const waterSupplies = mockSupplies.filter(s => s.type === 'water');
+      const medicalSupplies = mockSupplies.filter(s => s.type === 'medicine');
 
       expect(foodSupplies).toHaveLength(1);
       expect(waterSupplies).toHaveLength(1);
@@ -311,9 +356,9 @@ describe('UC03: Combined Operational Picture Telemetry Aggregations', () => {
   describe('Cross-Cutting Partner Organisation Representation', () => {
     it('aggregates resources across all four designated organisation types', () => {
       const orgTypes = new Set([
-        ...mockShelters.map((s) => s.organisationType),
-        ...mockTeams.map((t) => t.organisationType),
-        ...mockSupplies.map((s) => s.organisationType),
+        ...mockShelters.map(s => s.organisationType),
+        ...mockTeams.map(t => t.organisationType),
+        ...mockSupplies.map(s => s.organisationType),
       ]);
 
       // Explicit Case Study 02 requirement: Government, Armed Forces, NGOs, Private Donors
